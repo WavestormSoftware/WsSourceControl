@@ -18,7 +18,7 @@ namespace WsSourceControlEditor
         {
             _description = new PluginDescription
             {
-                Name = "WsSourceControl Editor",
+                Name = "WsSourceControl",
                 Category = "Source Control",
                 Author = "Wavestorm Software",
                 AuthorUrl = "https://github.com/WavestormSoftware",
