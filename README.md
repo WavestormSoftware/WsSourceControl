@@ -2,7 +2,7 @@
   <img src="Media/WSCBanner.png" alt="WsSourceControl Banner" width="100%" />
 </div>
 
-# WsSourceControl
+# WsSourceControl - Flax Engine Plugin
 
 A simple [Flax Engine](https://flaxengine.com/) plugin that adds a basic Git-based source control overview directly inside the Flax Editor. (Ws stands for Wavestorm).
 
