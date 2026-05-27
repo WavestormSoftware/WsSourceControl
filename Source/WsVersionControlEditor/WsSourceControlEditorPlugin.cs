@@ -37,6 +37,7 @@ namespace WsVersionControlEditor
             _toolstripButton.Clicked += OnOpenSourceControl;
 
             _menuButton = Editor.UI.MenuWindow.ContextMenu.AddButton("Source Control");
+            _menuButton.ShortKeys = "F8";
             _menuButton.Clicked += OnOpenSourceControl;
         }
 

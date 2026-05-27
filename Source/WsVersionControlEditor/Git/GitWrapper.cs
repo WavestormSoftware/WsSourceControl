@@ -168,7 +168,7 @@ namespace WsVersionControlEditor.Git
         public static List<GitChange> GetStatus()
         {
             var changes = new List<GitChange>();
-            var r = RunGitCommand("status -s");
+            var r = RunGitCommand("status --porcelain");
 
             if (!r.Success || string.IsNullOrWhiteSpace(r.Output))
                 return changes;
@@ -178,18 +178,27 @@ namespace WsVersionControlEditor.Git
             {
                 if (line.Length < 4) continue;
 
-                string status = line.Substring(0, 2);
+                char x = line[0];
+                char y = line[1];
                 string path = line.Substring(3).Trim();
 
                 if (path.StartsWith("\"") && path.EndsWith("\""))
                     path = path.Substring(1, path.Length - 2);
 
-                char x = status[0];
-                char y = status[1];
+                // Handle rename/copy: path will contain " -> newpath"
+                string originalPath = path;
+                int arrowIdx = path.IndexOf(" -> ", StringComparison.Ordinal);
+                if (arrowIdx >= 0)
+                {
+                    originalPath = path.Substring(0, arrowIdx);
+                    path = path.Substring(arrowIdx + 4);
+                }
 
+                // Staged changes (index column)
                 if (x != ' ' && x != '?')
                     changes.Add(new GitChange { Type = ParseChangeType(x), FilePath = path, Staged = true });
 
+                // Unstaged changes (worktree column) — includes untracked '?'
                 if (y != ' ')
                     changes.Add(new GitChange { Type = ParseChangeType(y), FilePath = path, Staged = false });
             }
@@ -313,25 +322,25 @@ namespace WsVersionControlEditor.Git
             return r.Success;
         }
 
-        public static bool Push()
+        public static GitResult Push()
         {
             var r = RunGitCommand("push");
             if (!r.Success) FlaxEngine.Debug.LogError($"Git Push Error: {r.Error}");
-            return r.Success;
+            return r;
         }
 
-        public static bool Pull()
+        public static GitResult Pull()
         {
             var r = RunGitCommand("pull");
             if (!r.Success) FlaxEngine.Debug.LogError($"Git Pull Error: {r.Error}");
-            return r.Success;
+            return r;
         }
 
-        public static bool Fetch()
+        public static GitResult Fetch()
         {
             var r = RunGitCommand("fetch");
             if (!r.Success) FlaxEngine.Debug.LogError($"Git Fetch Error: {r.Error}");
-            return r.Success;
+            return r;
         }
 
         public static List<string> GetBranches()
@@ -465,16 +474,39 @@ namespace WsVersionControlEditor.Git
         public static bool Reset(string filePath)
         {
             string safePath = filePath.Replace("\"", "\\\"");
-            var r = RunGitCommand($"checkout -- \"{safePath}\"");
-            if (!r.Success) FlaxEngine.Debug.LogError($"Git Reset Error: {r.Error}");
-            return r.Success;
+
+            // Check if the file is untracked — git checkout doesn't work for untracked files
+            var statusResult = RunGitCommand($"status --porcelain -- \"{safePath}\"");
+            if (statusResult.Success && !string.IsNullOrWhiteSpace(statusResult.Output))
+            {
+                string statusLine = statusResult.Output.Trim();
+                if (statusLine.Length >= 2 && statusLine[0] == '?' && statusLine[1] == '?')
+                {
+                    // Untracked file: remove it with git clean
+                    var r = RunGitCommand($"clean -f -- \"{safePath}\"");
+                    if (!r.Success) FlaxEngine.Debug.LogError($"Git Clean Error: {r.Error}");
+                    return r.Success;
+                }
+            }
+
+            var result = RunGitCommand($"checkout -- \"{safePath}\"");
+            if (!result.Success) FlaxEngine.Debug.LogError($"Git Reset Error: {result.Error}");
+            return result.Success;
         }
 
         public static bool ResetHard()
         {
             var r = RunGitCommand("reset --hard HEAD");
-            if (!r.Success) FlaxEngine.Debug.LogError($"Git Reset Hard Error: {r.Error}");
-            return r.Success;
+            if (!r.Success)
+            {
+                FlaxEngine.Debug.LogError($"Git Reset Hard Error: {r.Error}");
+                return false;
+            }
+
+            // Also clean untracked files and directories
+            var clean = RunGitCommand("clean -fd");
+            if (!clean.Success) FlaxEngine.Debug.LogWarning($"Git Clean Warning: {clean.Error}");
+            return true;
         }
 
         public static bool HasConflicts()
@@ -509,7 +541,7 @@ namespace WsVersionControlEditor.Git
 
         public static string GetStatusShort()
         {
-            var r = RunGitCommand("status -s");
+            var r = RunGitCommand("status --porcelain");
             return r.Success ? r.Output.Trim() : string.Empty;
         }
 
@@ -547,6 +579,7 @@ namespace WsVersionControlEditor.Git
                 case 'A': return GitChangeType.Added;
                 case 'D': return GitChangeType.Deleted;
                 case 'R': return GitChangeType.Renamed;
+                case 'C': return GitChangeType.Added; // Copy shows as added
                 case '?': return GitChangeType.Untracked;
                 default: return GitChangeType.Unknown;
             }

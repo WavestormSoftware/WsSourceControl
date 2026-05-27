@@ -1,36 +1,57 @@
 using System;
-using System.Collections.Generic;
-using System.Text;
-using FlaxEditor.CustomEditors.Elements;
 using FlaxEditor.GUI;
 using FlaxEditor.GUI.ContextMenu;
+using FlaxEditor.GUI.Docking;
 using FlaxEditor.GUI.Input;
 using FlaxEditor.GUI.Tabs;
-using FlaxEditor.GUI.Tree;
 using FlaxEditor.Windows;
 using FlaxEngine;
 using FlaxEngine.GUI;
 using WsVersionControlEditor.Git;
+using WsVersionControlEditor.VcsTabs;
+using WsVersionControlEditor.UI;
 
 namespace WsVersionControlEditor
 {
+    /// <summary>
+    /// Redesigned Source Control window for Flax Editor.
+    /// 
+    /// Architecture:
+    ///   - StatusBar at top: branch, sync status, remote, operation state
+    ///   - Tabs: Changes (4-quadrant split), History, Branches, Sync
+    ///   - Tab content delegated to separate classes for modularity
+    ///   - GitAsyncWrapper integration for non-blocking operations
+    ///   - Cross-tab refresh via DataChanged events
+    /// 
+    /// Layout:
+    ///   ┌─ StatusBar ─────────────────────────────────────────────┐
+    ///   │ main  Up 2 Down 1  │  origin: github.com/...  │ Ready  │
+    ///   └─────────────────────────────────────────────────────────┘
+    ///   ┌─ ToolStrip ─────────────────────────────────────────────┐
+    ///   │ [Refresh]                                               │
+    ///   └─────────────────────────────────────────────────────────┘
+    ///   ┌─ Tabs ──────────────────────────────────────────────────┐
+    ///   │ [Changes (3)]  [History]  [Branches]  [Sync]          │
+    ///   │                                                         │
+    ///   │  (Tab Content Area)                                    │
+    ///   │                                                         │
+    ///   └─────────────────────────────────────────────────────────┘
+    /// </summary>
     public class WsSourceControlWindow : EditorWindow
     {
+        private VcsStatusBar _statusBar;
         private Tabs _tabs;
-        private Tree _stagedTree;
-        private Tree _unstagedTree;
-        private TextBox _commitMessage;
-        private CheckBox _amendCheck;
-        private TextBox _diffTextBox;
-        private Label _diffFileLabel;
-        private Tree _historyTree;
-        private SearchBox _historySearch;
-        private TextBox _historyDetailText;
-        private Tree _branchTree;
-        private TextBox _newBranchBox;
-        private Label _remoteLabel;
-        private ContainerControl _stashContainer;
-        private ContainerControl _conflictContainer;
+        private ToolStrip _toolStrip;
+        private GitAsyncWrapper _asyncWrapper;
+
+        // Tab content handlers
+        private ChangesTab _changesTab;
+        private HistoryTab _historyTab;
+        private BranchesTab _branchesTab;
+        private SyncTab _syncTab;
+
+        // Tab references for badge updates
+        private Tab _changesTabRef;
 
         public WsSourceControlWindow() : base(FlaxEditor.Editor.Instance, false, ScrollBars.None)
         {
@@ -46,719 +67,248 @@ namespace WsVersionControlEditor
                 return;
             }
 
+            // Initialize async wrapper for non-blocking git ops
+            _asyncWrapper = new GitAsyncWrapper(
+                statusText => _statusBar?.UpdateStatus(statusText, true),
+                error => 
+                {
+                    Debug.LogError($"Git error: {error}");
+                    FlaxEngine.MessageBox.Show(error, "Git Error", FlaxEngine.MessageBoxButtons.OK, FlaxEngine.MessageBoxIcon.Error);
+                });
+
+            _toolStrip = new ToolStrip
+            {
+                Parent = this,
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = new Margin(0, 0, 0, 28),
+            };
+
+            var refreshBtn = _toolStrip.AddButton("Refresh");
+            refreshBtn.Clicked += RefreshAllData;
+
+            _toolStrip.AddSeparator();
+
+            var fetchBtn = _toolStrip.AddButton("Fetch");
+            fetchBtn.Clicked += () => _asyncWrapper.RunAsync(GitWrapper.Fetch, res => { if (res.Success) RefreshAllData(); }, "Fetching...");
+
+            var pullBtn = _toolStrip.AddButton("Pull");
+            pullBtn.Clicked += () => _asyncWrapper.RunAsync(GitWrapper.Pull, res => { if (res.Success) RefreshAllData(); }, "Pulling...");
+
+            var pushBtn = _toolStrip.AddButton("Push");
+            pushBtn.Clicked += () => _asyncWrapper.RunAsync(GitWrapper.Push, res => { if (res.Success) RefreshAllData(); }, "Pushing...");
+
             _tabs = new Tabs
             {
                 Orientation = Orientation.Horizontal,
-                TabsSize = new Float2(100, 28),
-                AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = Margin.Zero,
+                UseScroll = true,
+                TabsSize = new Float2(120, 28),
                 Parent = this,
+                AnchorPreset = AnchorPresets.StretchAll,
+                Offsets = new Margin(0, 0, 28, 28), // Starts below ToolStrip (28), leaves 28 for StatusBar
             };
 
-            BuildChangesTab(_tabs.AddTab(new Tab("Changes")));
-            BuildHistoryTab(_tabs.AddTab(new Tab("History")));
-            BuildBranchesTab(_tabs.AddTab(new Tab("Branches")));
-            BuildSyncTab(_tabs.AddTab(new Tab("Sync")));
+            _statusBar = new VcsStatusBar
+            {
+                Parent = this,
+                AnchorPreset = AnchorPresets.HorizontalStretchBottom,
+                Offsets = new Margin(0, 0, -28, 28), // Bottom docked, 28px tall
+            };
+            _statusBar.RefreshFromGit();
 
-            RefreshData();
+            // Changes tab (primary)
+            _changesTabRef = _tabs.AddTab(new Tab("Changes"));
+            _changesTab = new ChangesTab();
+            _changesTab.Build(_changesTabRef);
+            _changesTab.DataChanged += OnChangesDataChanged;
+
+            // History tab
+            var historyTabRef = _tabs.AddTab(new Tab("History"));
+            _historyTab = new HistoryTab();
+            _historyTab.Build(historyTabRef);
+
+            // Branches tab
+            var branchesTabRef = _tabs.AddTab(new Tab("Branches"));
+            _branchesTab = new BranchesTab();
+            _branchesTab.Build(branchesTabRef);
+            _branchesTab.DataChanged += OnBranchesDataChanged;
+
+            // Sync tab
+            var syncTabRef = _tabs.AddTab(new Tab("Sync"));
+            _syncTab = new SyncTab();
+            _syncTab.Build(syncTabRef);
+            _syncTab.DataChanged += OnSyncDataChanged;
+
+            // Initial data load
+            RefreshAllData();
         }
 
-        private VerticalPanel CreateScrollContent(Tab tab)
-        {
-            var scroll = new Panel(ScrollBars.Vertical)
-            {
-                AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = Margin.Zero,
-                Parent = tab,
-            };
-            var content = new VerticalPanel
-            {
-                AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = Margin.Zero,
-                IsScrollable = true,
-                AutoSize = true,
-                Spacing = 3f,
-                Margin = new Margin(3f),
-                Parent = scroll,
-            };
-            return content;
-        }
-
+        /// <summary>
+        /// Rebuild the entire UI (e.g., after git init).
+        /// </summary>
         private void RebuildUI()
         {
             for (int i = ChildrenCount - 1; i >= 0; i--)
                 Children[i].Dispose();
 
+            _statusBar = null;
             _tabs = null;
-            _stagedTree = null;
-            _unstagedTree = null;
-            _commitMessage = null;
-            _amendCheck = null;
-            _diffTextBox = null;
-            _diffFileLabel = null;
-            _historyTree = null;
-            _historySearch = null;
-            _historyDetailText = null;
-            _branchTree = null;
-            _newBranchBox = null;
-            _remoteLabel = null;
-            _stashContainer = null;
-            _conflictContainer = null;
+            _toolStrip = null;
+            _asyncWrapper?.Dispose();
+            _asyncWrapper = null;
+            _changesTab = null;
+            _historyTab = null;
+            _branchesTab = null;
+            _syncTab = null;
+            _changesTabRef = null;
 
             BuildUI();
         }
 
-        private void RefreshData()
-        {
-            PopulateChangesTrees();
-            PopulateHistoryTree();
-            PopulateBranchTree();
-            PopulateStashList();
-            PopulateConflictSection();
 
-            if (_remoteLabel != null)
-            {
-                string remote = GitWrapper.GetRemoteUrl();
-                _remoteLabel.Text = string.IsNullOrEmpty(remote) ? "(No remote configured)" : remote;
-            }
+        /// <summary>
+        /// When changes tab modifies data (commit, stage, discard), refresh everything.
+        /// </summary>
+        private void OnChangesDataChanged()
+        {
+            _historyTab?.RefreshData();
+            _statusBar?.RefreshFromGit();
+            UpdateChangesBadge();
         }
 
-        #region No Repo
+        /// <summary>
+        /// When branches tab changes branch, refresh everything.
+        /// </summary>
+        private void OnBranchesDataChanged()
+        {
+            _changesTab?.RefreshData();
+            _historyTab?.RefreshData();
+            _statusBar?.RefreshFromGit();
+            UpdateChangesBadge();
+        }
+
+        /// <summary>
+        /// When sync tab performs remote ops, refresh everything.
+        /// </summary>
+        private void OnSyncDataChanged()
+        {
+            _changesTab?.RefreshData();
+            _historyTab?.RefreshData();
+            _branchesTab?.RefreshData();
+            _statusBar?.RefreshFromGit();
+            UpdateChangesBadge();
+        }
+
+        /// <summary>
+        /// Refresh all tab data and the status bar.
+        /// </summary>
+        public void RefreshAllData()
+        {
+            _changesTab?.RefreshData();
+            _historyTab?.RefreshData();
+            _branchesTab?.RefreshData();
+            _syncTab?.RefreshData();
+            _statusBar?.RefreshFromGit();
+            _statusBar?.UpdateStatus("Ready", false);
+            UpdateChangesBadge();
+        }
+
+        /// <summary>
+        /// Update the Changes tab badge to show the number of unstaged changes.
+        /// </summary>
+        private void UpdateChangesBadge()
+        {
+            if (_changesTabRef == null) return;
+            var changes = GitWrapper.GetStatus();
+            int total = 0;
+            foreach (var c in changes)
+                if (!c.Staged) total++;
+            _changesTabRef.Text = total > 0 ? $"Changes ({total})" : "Changes";
+        }
+
+
+        public override void Update(float deltaTime)
+        {
+            base.Update(deltaTime);
+            _changesTab?.Update(deltaTime);
+        }
+
+        public override bool OnKeyDown(KeyboardKeys key)
+        {
+            // F5 = Refresh
+            if (key == KeyboardKeys.F5)
+            {
+                RefreshAllData();
+                return true;
+            }
+
+            return base.OnKeyDown(key);
+        }
+
 
         private void BuildNoRepoLayout()
         {
-            var scroll = new Panel(ScrollBars.Vertical)
+            var container = new ContainerControl
             {
                 AnchorPreset = AnchorPresets.StretchAll,
                 Offsets = Margin.Zero,
                 Parent = this,
             };
+
             var content = new VerticalPanel
             {
-                AnchorPreset = AnchorPresets.StretchAll,
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
                 Offsets = Margin.Zero,
-                IsScrollable = true,
                 AutoSize = true,
-                Spacing = 3f,
-                Margin = new Margin(3f),
-                Parent = scroll,
+                Spacing = 8f,
+                Margin = new Margin(16f),
+                Parent = container,
             };
 
-            var group = new GroupElement();
-            group.Panel.HeaderText = "Git Repository";
-            group.Panel.Parent = content;
-            group.Label("This project is not inside a Git repository.").Label.HorizontalAlignment = TextAlignment.Center;
-            var initBtn = group.Button("Initialize Git Repository");
-            initBtn.Button.Clicked += () =>
+            // Center the content visually
+            var title = new Label
+            {
+                Parent = content,
+                Text = "Source Control",
+                TextColor = Style.Current.Foreground,
+                HorizontalAlignment = TextAlignment.Center,
+                AutoWidth = true,
+                Height = 32,
+                Margin = new Margin(0, 0, 16, 8),
+            };
+
+            var infoLabel = new Label
+            {
+                Parent = content,
+                Text = "This project is not inside a Git repository.\nInitialize a repository to start using source control.",
+                TextColor = Style.Current.ForegroundGrey,
+                HorizontalAlignment = TextAlignment.Center,
+                AutoWidth = true,
+                Margin = new Margin(0, 0, 4, 4),
+            };
+
+            var initBtn = new Button
+            {
+                Parent = content,
+                Text = "Initialize Git Repository",
+                Width = 200,
+                Height = 32,
+                X = 50, // slight offset for centering
+                BackgroundColor = Style.Current.BackgroundSelected,
+                BackgroundColorHighlighted = Style.Current.BackgroundSelected.RGBMultiplied(1.2f),
+            };
+            initBtn.Clicked += () =>
             {
                 GitWrapper.InitRepo();
                 RebuildUI();
             };
         }
 
-        #endregion
 
-        #region Changes Tab
-
-        private void BuildChangesTab(Tab tab)
+        public override void OnDestroy()
         {
-            var content = CreateScrollContent(tab);
-
-            string branch = GitWrapper.GetCurrentBranch();
-            GitWrapper.GetAheadBehind(out int ahead, out int behind);
-            string syncInfo = branch;
-            if (ahead > 0 || behind > 0)
-                syncInfo += $"  (↑{ahead} ↓{behind})";
-
-            var branchGroup = new GroupElement();
-            branchGroup.Panel.HeaderText = $"Branch: {syncInfo}";
-            branchGroup.Panel.Parent = content;
-            var refreshBtn = branchGroup.Button("Refresh");
-            refreshBtn.Button.Clicked += () => RefreshData();
-
-            var stagedGroup = new GroupElement();
-            stagedGroup.Panel.HeaderText = "Staged Changes";
-            stagedGroup.Panel.Parent = content;
-            var unstageAllBtn = stagedGroup.Button("Unstage All");
-            unstageAllBtn.Button.Clicked += () =>
-            {
-                var changes = GitWrapper.GetStatus();
-                var paths = new List<string>();
-                foreach (var c in changes)
-                    if (c.Staged) paths.Add(c.FilePath);
-                if (paths.Count > 0)
-                {
-                    GitWrapper.Unstage(paths.ToArray());
-                    RefreshData();
-                }
-            };
-            _stagedTree = new Tree(false) { IsScrollable = true, Parent = stagedGroup.Panel, Height = 120 };
-            _stagedTree.SelectedChanged += (b, a) => OnFileSelected(a, true);
-            _stagedTree.RightClick += (n, l) => OnFileRightClick(n, l, true, _stagedTree);
-
-            var unstagedGroup = new GroupElement();
-            unstagedGroup.Panel.HeaderText = "Unstaged Changes";
-            unstagedGroup.Panel.Parent = content;
-            var stageAllBtn = unstagedGroup.Button("Stage All");
-            stageAllBtn.Button.Clicked += () =>
-            {
-                GitWrapper.AddAll();
-                RefreshData();
-            };
-            _unstagedTree = new Tree(false) { IsScrollable = true, Parent = unstagedGroup.Panel, Height = 120 };
-            _unstagedTree.SelectedChanged += (b, a) => OnFileSelected(a, false);
-            _unstagedTree.RightClick += (n, l) => OnFileRightClick(n, l, false, _unstagedTree);
-
-            var diffGroup = new GroupElement();
-            diffGroup.Panel.HeaderText = "Diff";
-            diffGroup.Panel.Parent = content;
-            _diffFileLabel = new Label
-            {
-                Parent = diffGroup.Panel,
-                Text = "(select a file)",
-                TextColor = FlaxEngine.GUI.Style.Current.ForegroundGrey,
-                AutoWidth = true,
-                IsScrollable = true,
-                Margin = new Margin(4, 0, 2, 2),
-            };
-            _diffTextBox = new TextBox(true, 0, 0, 0)
-            {
-                Parent = diffGroup.Panel,
-                IsReadOnly = true,
-                IsScrollable = true,
-                Height = 100,
-                BackgroundColor = FlaxEngine.GUI.Style.Current.TextBoxBackground,
-                BorderColor = FlaxEngine.GUI.Style.Current.BorderNormal,
-                TextColor = FlaxEngine.GUI.Style.Current.Foreground,
-            };
-
-            var commitGroup = new GroupElement();
-            commitGroup.Panel.HeaderText = "Commit";
-            commitGroup.Panel.Parent = content;
-            _commitMessage = new TextBox(true, 0, 0, 0)
-            {
-                Parent = commitGroup.Panel,
-                IsMultiline = true,
-                IsScrollable = true,
-                Height = 48,
-                WatermarkText = "Enter commit message...",
-            };
-
-            _amendCheck = commitGroup.Checkbox("Amend").CheckBox;
-            var commitBtn = commitGroup.Button("Commit Staged");
-            commitBtn.Button.BackgroundColor = FlaxEngine.GUI.Style.Current.BackgroundSelected;
-            commitBtn.Button.BackgroundColorHighlighted = FlaxEngine.GUI.Style.Current.BackgroundSelected.RGBMultiplied(1.2f);
-            commitBtn.Button.Clicked += OnCommit;
+            _asyncWrapper?.Dispose();
+            _asyncWrapper = null;
+            base.OnDestroy();
         }
-
-        private void OnFileSelected(List<TreeNode> selection, bool staged)
-        {
-            if (selection == null || selection.Count == 0 || selection[0] is not ChangeTreeNode node) return;
-            _diffFileLabel.Text = node.Change.FilePath;
-            string diff = staged ? GitWrapper.GetDiffStaged(node.Change.FilePath) : GitWrapper.GetDiff(node.Change.FilePath);
-            _diffTextBox.Text = string.IsNullOrEmpty(diff) ? "(No diff available)" : diff;
-        }
-
-        private void OnFileRightClick(TreeNode node, Float2 location, bool isStaged, Tree tree)
-        {
-            if (node is not ChangeTreeNode cn) return;
-            var menu = new ContextMenu();
-
-            if (isStaged)
-            {
-                menu.AddButton("Unstage", () => { GitWrapper.Unstage(new[] { cn.Change.FilePath }); RefreshData(); });
-                menu.AddButton("View Diff (Staged)", () =>
-                {
-                    _diffFileLabel.Text = cn.Change.FilePath;
-                    _diffTextBox.Text = GitWrapper.GetDiffStaged(cn.Change.FilePath) ?? "(No diff)";
-                });
-            }
-            else
-            {
-                menu.AddButton("Stage", () => { GitWrapper.Add(new[] { cn.Change.FilePath }); RefreshData(); });
-                menu.AddButton("Discard Changes", () => { GitWrapper.Reset(cn.Change.FilePath); RefreshData(); });
-                menu.AddButton("View Diff", () =>
-                {
-                    _diffFileLabel.Text = cn.Change.FilePath;
-                    _diffTextBox.Text = GitWrapper.GetDiff(cn.Change.FilePath) ?? "(No diff)";
-                });
-            }
-
-            menu.AddSeparator();
-            menu.AddButton("Open in Explorer", () =>
-            {
-                var fullPath = System.IO.Path.Combine(GitWrapper.ProjectPath, cn.Change.FilePath);
-                if (System.IO.File.Exists(fullPath))
-                    FileSystem.ShowFileExplorer(fullPath);
-            });
-
-            menu.Show(tree, location);
-        }
-
-        private void OnCommit()
-        {
-            string msg = _commitMessage?.Text ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(msg))
-            {
-                Debug.LogWarning("Please enter a commit message.");
-                return;
-            }
-
-            bool amend = _amendCheck?.Checked ?? false;
-            if (amend)
-            {
-                GitWrapper.CommitAmend(msg);
-                _commitMessage.Text = string.Empty;
-            }
-            else
-            {
-                GitWrapper.Commit(msg);
-                _commitMessage.Text = string.Empty;
-            }
-            RefreshData();
-        }
-
-        private void PopulateChangesTrees()
-        {
-            if (_stagedTree == null || _unstagedTree == null) return;
-            _stagedTree.DisposeChildren();
-            _unstagedTree.DisposeChildren();
-
-            var changes = GitWrapper.GetStatus();
-            foreach (var change in changes)
-            {
-                var node = new ChangeTreeNode(change);
-                node.Parent = change.Staged ? _stagedTree : _unstagedTree;
-            }
-            _stagedTree.PerformLayout();
-            _unstagedTree.PerformLayout();
-        }
-
-        #endregion
-
-        #region History Tab
-
-        private void BuildHistoryTab(Tab tab)
-        {
-            var split = new SplitPanel(Orientation.Horizontal, ScrollBars.Vertical, ScrollBars.Vertical)
-            {
-                AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = Margin.Zero,
-                SplitterValue = 0.4f,
-                Parent = tab,
-            };
-
-            var leftContent = new VerticalPanel
-            {
-                AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = Margin.Zero,
-                IsScrollable = true,
-                AutoSize = true,
-                Spacing = 3f,
-                Margin = new Margin(3f),
-                Parent = split.Panel1,
-            };
-
-            _historySearch = new SearchBox
-            {
-                IsScrollable = true,
-                Height = 20,
-                Parent = leftContent,
-            };
-            _historySearch.TextChanged += () => PopulateHistoryTree();
-
-            _historyTree = new Tree(false)
-            {
-                IsScrollable = true,
-                Parent = split.Panel1,
-                Height = 300,
-            };
-            _historyTree.SelectedChanged += OnHistorySelectionChanged;
-
-            _historyDetailText = new TextBox(true, 0, 0, 0)
-            {
-                AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = new Margin(4, 4, 4, 4),
-                IsReadOnly = true,
-                Parent = split.Panel2,
-                BackgroundColor = FlaxEngine.GUI.Style.Current.TextBoxBackground,
-                BorderColor = FlaxEngine.GUI.Style.Current.BorderNormal,
-                TextColor = FlaxEngine.GUI.Style.Current.Foreground,
-            };
-        }
-
-        private void PopulateHistoryTree()
-        {
-            if (_historyTree == null) return;
-            _historyTree.DisposeChildren();
-
-            var log = GitWrapper.GetLog(50);
-            string filter = _historySearch?.Text?.Trim() ?? string.Empty;
-
-            foreach (var entry in log)
-            {
-                if (!string.IsNullOrEmpty(filter))
-                {
-                    bool match = entry.Hash.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                                 entry.Author.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                                 entry.Message.Contains(filter, StringComparison.OrdinalIgnoreCase);
-                    if (!match) continue;
-                }
-                new CommitTreeNode(entry).Parent = _historyTree;
-            }
-            _historyTree.PerformLayout();
-        }
-
-        private void OnHistorySelectionChanged(List<TreeNode> before, List<TreeNode> after)
-        {
-            if (after == null || after.Count == 0 || after[0] is not CommitTreeNode node) return;
-            if (_historyDetailText == null) return;
-
-            string detail = GitWrapper.GetCommitDetail(node.Entry.Hash);
-            var files = GitWrapper.GetCommitChangedFiles(node.Entry.Hash);
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"Commit:  {node.Entry.Hash}");
-            sb.AppendLine($"Author:  {node.Entry.Author}");
-            sb.AppendLine($"Date:    {node.Entry.Date}");
-            sb.AppendLine($"Message: {node.Entry.Message}");
-            sb.AppendLine();
-            if (files.Count > 0)
-            {
-                sb.AppendLine("Changed Files:");
-                foreach (var f in files)
-                    sb.AppendLine($"  {f}");
-                sb.AppendLine();
-            }
-            sb.Append(detail);
-            _historyDetailText.Text = sb.ToString();
-        }
-
-        #endregion
-
-        #region Branches Tab
-
-        private void BuildBranchesTab(Tab tab)
-        {
-            var content = CreateScrollContent(tab);
-
-            var localGroup = new GroupElement();
-            localGroup.Panel.HeaderText = "Local Branches";
-            localGroup.Panel.Parent = content;
-            _branchTree = new Tree(false) { IsScrollable = true, Parent = localGroup.Panel, Height = 200 };
-            _branchTree.RightClick += OnBranchRightClick;
-
-            var remoteGroup = new GroupElement();
-            remoteGroup.Panel.HeaderText = "Remote";
-            remoteGroup.Panel.Parent = content;
-            _remoteLabel = new Label
-            {
-                Parent = remoteGroup.Panel,
-                Text = GitWrapper.GetRemoteUrl() ?? "(none)",
-                TextColor = FlaxEngine.GUI.Style.Current.ForegroundGrey,
-                AutoWidth = true,
-                IsScrollable = true,
-                Margin = new Margin(4, 0, 2, 4),
-            };
-
-            var createGroup = new GroupElement();
-            createGroup.Panel.HeaderText = "Create Branch";
-            createGroup.Panel.Parent = content;
-            _newBranchBox = createGroup.TextBox().TextBox;
-            _newBranchBox.WatermarkText = "Branch name...";
-            var createBtn = createGroup.Button("Create & Checkout");
-            createBtn.Button.BackgroundColor = FlaxEngine.GUI.Style.Current.BackgroundSelected;
-            createBtn.Button.BackgroundColorHighlighted = FlaxEngine.GUI.Style.Current.BackgroundSelected.RGBMultiplied(1.2f);
-            createBtn.Button.Clicked += OnCreateBranch;
-        }
-
-        private void PopulateBranchTree()
-        {
-            if (_branchTree == null) return;
-            _branchTree.DisposeChildren();
-
-            var localBranches = GitWrapper.GetBranches();
-            string currentBranch = GitWrapper.GetCurrentBranch();
-
-            foreach (var branch in localBranches)
-            {
-                bool isCurrent = branch == currentBranch && !GitWrapper.IsDetachedHead();
-                new BranchTreeNode(branch, isCurrent, false).Parent = _branchTree;
-            }
-
-            var remoteBranches = GitWrapper.GetRemoteBranches();
-            if (remoteBranches.Count > 0)
-            {
-                var remoteNode = new TreeNode { Text = "Remote" };
-                remoteNode.Parent = _branchTree;
-                remoteNode.Expand();
-
-                foreach (var branch in remoteBranches)
-                    new BranchTreeNode(branch, false, true).Parent = remoteNode;
-            }
-
-            _branchTree.PerformLayout();
-        }
-
-        private void OnBranchRightClick(TreeNode node, Float2 location)
-        {
-            if (node is not BranchTreeNode branchNode) return;
-            var menu = new ContextMenu();
-
-            if (!branchNode.IsRemote && !branchNode.IsCurrent)
-            {
-                menu.AddButton("Checkout", () => { GitWrapper.CheckoutBranch(branchNode.BranchName); RefreshData(); });
-                menu.AddButton("Delete", () => { GitWrapper.DeleteBranch(branchNode.BranchName); RefreshData(); });
-            }
-            else if (branchNode.IsCurrent)
-            {
-                menu.AddButton("Create From Here...", () =>
-                {
-                    if (_newBranchBox != null)
-                    {
-                        _newBranchBox.Text = string.Empty;
-                        _newBranchBox.Focus();
-                        if (_tabs != null) _tabs.SelectedTabIndex = 2;
-                    }
-                });
-            }
-
-            menu.Show(_branchTree, location);
-        }
-
-        private void OnCreateBranch()
-        {
-            string name = _newBranchBox?.Text?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                Debug.LogWarning("Branch name cannot be empty.");
-                return;
-            }
-            GitWrapper.CreateBranch(name);
-            _newBranchBox.Text = string.Empty;
-            RefreshData();
-        }
-
-        #endregion
-
-        #region Sync Tab
-
-        private void BuildSyncTab(Tab tab)
-        {
-            var content = CreateScrollContent(tab);
-
-            var syncGroup = new GroupElement();
-            syncGroup.Panel.HeaderText = "Sync";
-            syncGroup.Panel.Parent = content;
-
-            var fetchBtn = syncGroup.Button("Fetch");
-            fetchBtn.Button.Clicked += () => { GitWrapper.Fetch(); RefreshData(); };
-
-            var pullBtn = syncGroup.Button("Pull");
-            pullBtn.Button.BackgroundColor = new Color(0.2f, 0.55f, 0.2f);
-            pullBtn.Button.BackgroundColorHighlighted = new Color(0.25f, 0.65f, 0.25f);
-            pullBtn.Button.Clicked += () => { GitWrapper.Pull(); RefreshData(); };
-
-            var pushBtn = syncGroup.Button("Push");
-            pushBtn.Button.BackgroundColor = new Color(0.55f, 0.3f, 0.15f);
-            pushBtn.Button.BackgroundColorHighlighted = new Color(0.65f, 0.35f, 0.18f);
-            pushBtn.Button.Clicked += () => { GitWrapper.Push(); RefreshData(); };
-
-            var stashBtn = syncGroup.Button("Stash");
-            stashBtn.Button.Clicked += () => { GitWrapper.Stash(); RefreshData(); };
-
-            var popBtn = syncGroup.Button("Stash Pop");
-            popBtn.Button.Clicked += () => { GitWrapper.StashPop(); RefreshData(); };
-
-            var stashGroup = new GroupElement();
-            stashGroup.Panel.HeaderText = "Stashes";
-            stashGroup.Panel.Parent = content;
-            _stashContainer = stashGroup.Panel;
-
-            var conflictGroup = new GroupElement();
-            conflictGroup.Panel.HeaderText = "Conflicts";
-            conflictGroup.Panel.Parent = content;
-            _conflictContainer = conflictGroup.Panel;
-        }
-
-        private void PopulateStashList()
-        {
-            if (_stashContainer == null) return;
-
-            for (int i = _stashContainer.ChildrenCount - 1; i >= 0; i--)
-            {
-                var child = _stashContainer.Children[i];
-                if (child is not DropPanel)
-                    child.Dispose();
-            }
-
-            var stashes = GitWrapper.GetStashList();
-            if (stashes.Count == 0)
-            {
-                new Label
-                {
-                    Text = "No stashes.",
-                    Parent = _stashContainer,
-                    TextColor = FlaxEngine.GUI.Style.Current.ForegroundGrey,
-                    AutoWidth = true,
-                    IsScrollable = true,
-                    Margin = new Margin(4, 0, 2, 4),
-                };
-                return;
-            }
-
-            foreach (var stash in stashes)
-            {
-                var row = new HorizontalPanel
-                {
-                    Parent = _stashContainer,
-                    Height = 26,
-                    IsScrollable = true,
-                    Offsets = new Margin(2, 2, 1, 1),
-                };
-
-                new Label
-                {
-                    Text = $"stash@{{{stash.Index}}}: {stash.Message}",
-                    Parent = row,
-                    AutoWidth = true,
-                    IsScrollable = true,
-                    TextColor = FlaxEngine.GUI.Style.Current.Foreground,
-                };
-
-                var popBtn = new Button
-                {
-                    Text = "Pop",
-                    Parent = row,
-                    Width = 44,
-                    Height = 20,
-                    IsScrollable = true,
-                    BackgroundColor = FlaxEngine.GUI.Style.Current.BackgroundNormal,
-                    BackgroundColorHighlighted = FlaxEngine.GUI.Style.Current.BackgroundHighlighted,
-                };
-                popBtn.Clicked += () => { GitWrapper.StashPop(); RefreshData(); };
-
-                var applyBtn = new Button
-                {
-                    Text = "Apply",
-                    Parent = row,
-                    Width = 48,
-                    Height = 20,
-                    IsScrollable = true,
-                    BackgroundColor = FlaxEngine.GUI.Style.Current.BackgroundNormal,
-                    BackgroundColorHighlighted = FlaxEngine.GUI.Style.Current.BackgroundHighlighted,
-                };
-                int idx = stash.Index;
-                applyBtn.Clicked += () => { GitWrapper.StashApply(idx); RefreshData(); };
-
-                var dropBtn = new Button
-                {
-                    Text = "Drop",
-                    Parent = row,
-                    Width = 44,
-                    Height = 20,
-                    IsScrollable = true,
-                    BackgroundColor = new Color(0.5f, 0.15f, 0.15f),
-                    BackgroundColorHighlighted = new Color(0.7f, 0.2f, 0.2f),
-                };
-                dropBtn.Clicked += () => { GitWrapper.StashDrop(idx); RefreshData(); };
-
-                row.PerformLayout();
-            }
-        }
-
-        private void PopulateConflictSection()
-        {
-            if (_conflictContainer == null) return;
-
-            for (int i = _conflictContainer.ChildrenCount - 1; i >= 0; i--)
-            {
-                var child = _conflictContainer.Children[i];
-                if (child is not DropPanel)
-                    child.Dispose();
-            }
-
-            if (!GitWrapper.HasConflicts())
-            {
-                new Label
-                {
-                    Text = "No conflicts detected.",
-                    Parent = _conflictContainer,
-                    TextColor = new Color(0.35f, 0.85f, 0.35f),
-                    AutoWidth = true,
-                    IsScrollable = true,
-                    Margin = new Margin(4, 0, 2, 4),
-                };
-                return;
-            }
-
-            new Label
-            {
-                Text = "Merge conflicts detected! Resolve before committing.",
-                Parent = _conflictContainer,
-                TextColor = new Color(0.9f, 0.3f, 0.3f),
-                AutoWidth = true,
-                IsScrollable = true,
-                Margin = new Margin(4, 0, 2, 4),
-            };
-
-            foreach (var file in GitWrapper.GetConflictFiles())
-            {
-                new Label
-                {
-                    Text = $"  {file.FilePath}",
-                    Parent = _conflictContainer,
-                    TextColor = new Color(0.9f, 0.5f, 0.2f),
-                    AutoWidth = true,
-                    IsScrollable = true,
-                    Margin = new Margin(8, 0, 0, 2),
-                };
-            }
-        }
-
-        #endregion
-
-        #region Custom Tree Nodes
-
-        private class ChangeTreeNode : TreeNode
-        {
-            public readonly GitChange Change;
-
-            public ChangeTreeNode(GitChange change)
-            {
-                Change = change;
-                Text = $"{GitWrapper.GetChangeTypePrefix(change.Type)}  {change.FilePath}";
-                TextColor = GitWrapper.GetChangeColor(change.Type);
-            }
-        }
-
-        private class CommitTreeNode : TreeNode
-        {
-            public readonly GitLogEntry Entry;
-
-            public CommitTreeNode(GitLogEntry entry)
-            {
-                Entry = entry;
-                Text = $"{entry.Hash}  {entry.Date}  {entry.Author}";
-            }
-        }
-
-        private class BranchTreeNode : TreeNode
-        {
-            public readonly string BranchName;
-            public readonly bool IsCurrent;
-            public readonly bool IsRemote;
-
-            public BranchTreeNode(string branchName, bool isCurrent, bool isRemote)
-            {
-                BranchName = branchName;
-                IsCurrent = isCurrent;
-                IsRemote = isRemote;
-                Text = isCurrent ? $"● {branchName}" : $"  {branchName}";
-                TextColor = isCurrent ? FlaxEngine.GUI.Style.Current.BorderSelected : FlaxEngine.GUI.Style.Current.Foreground;
-            }
-        }
-
-        #endregion
     }
 }
