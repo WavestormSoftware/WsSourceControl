@@ -19,14 +19,35 @@ A simple [Flax Engine](https://flaxengine.com/) plugin that adds a basic Git-bas
 - **Async git operations** — Background thread execution with main-thread callback marshalling for non-blocking UI and error popups
 
 ## Installation
-
-1. Copy the `WsSourceControl` folder into your Flax project's `Plugins/` directory
-2. Regenerate project files and rebuild
-
-## Requirements
-
-- Flax Engine 1.12+
+#### Requirements
+- FlaxEngine `v. 1.12` or above
 - Git installed and available in PATH
+
+#### The easy way:
+- In the Flax Editor, go to `Tools > Plugins > Clone Project`
+- Paste this repo link `https://github.com/WavestormSoftware/WsSourceControl.git` into the `Git Path`
+- Click `Clone`
+- Restart the Editor
+- Done
+
+#### Manual installation:
+- Close the Editor
+- Clone this repo into `<your-game-project-folder>\Plugins\WsSourceControl\`
+- Add a reference to WsSourceControl to your game by modifying the `<your-game>.flaxproj` file:
+```json
+...
+"References": [
+    {
+        "Name": "$(EnginePath)/Flax.flaxproj"
+    },
+    {
+        "Name": "$(ProjectPath)/Plugins/WsSourceControl/WsSourceControl.flaxproj"
+    }
+]
+...
+```
+- Restart the Editor
+- Done
 
 ## License
 
