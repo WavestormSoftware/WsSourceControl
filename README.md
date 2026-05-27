@@ -6,6 +6,12 @@
 
 A simple [Flax Engine](https://flaxengine.com/) plugin that adds a basic Git-based source control overview directly inside the Flax Editor. (Ws stands for Wavestorm).
 
+<details>
+<summary><b>View Screenshot</b></summary>
+<br>
+<img src="Media/Screenshot.png" alt="WsSourceControl Screenshot" width="800" />
+</details>
+
 ## Features
 
 - **Editor toolbar integration** — Source Control button in the ToolStrip and Window menu (F8 shortcut)
@@ -48,6 +54,10 @@ A simple [Flax Engine](https://flaxengine.com/) plugin that adds a basic Git-bas
 ```
 - Restart the Editor
 - Done
+
+## Support & Issues
+
+If you encounter any bugs, crashes, or have feature requests, please feel free to open an issue on the GitHub repository!
 
 ## License
 
