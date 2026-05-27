@@ -22,6 +22,8 @@ namespace WsSourceControlEditor
                 Category = "Source Control",
                 Author = "Wavestorm Software",
                 AuthorUrl = "https://github.com/WavestormSoftware",
+                RepositoryUrl = "https://github.com/WavestormSoftware/WsSourceControl",
+                HomepageUrl = "https://github.com/WavestormSoftware/WsSourceControl",
                 Description = "Professional Git-based source control GUI for Flax Engine.",
                 Version = new Version(2, 0),
                 IsAlpha = false,
