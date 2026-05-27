@@ -5,16 +5,17 @@ using FlaxEditor.GUI;
 using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.GUI.Docking;
 using FlaxEngine;
+using WsSourceControl;
 
 namespace WsSourceControlEditor
 {
-    public class WsSourceControlEditorPlugin : EditorPlugin
+    public class WsSourceControlPlugin : EditorPlugin
     {
         private ToolStripButton _toolstripButton;
         private ContextMenuButton _menuButton;
         private WsSourceControlWindow _window;
 
-        public WsSourceControlEditorPlugin()
+        public WsSourceControlPlugin()
         {
             _description = new PluginDescription
             {

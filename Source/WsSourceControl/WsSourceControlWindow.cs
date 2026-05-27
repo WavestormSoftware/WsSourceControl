@@ -7,11 +7,11 @@ using FlaxEditor.GUI.Tabs;
 using FlaxEditor.Windows;
 using FlaxEngine;
 using FlaxEngine.GUI;
-using WsSourceControlEditor.Git;
-using WsSourceControlEditor.VcsTabs;
-using WsSourceControlEditor.UI;
+using WsSourceControl.Git;
+using WsSourceControl.UI;
+using WsSourceControl.VcsTabs;
 
-namespace WsSourceControlEditor
+namespace WsSourceControl
 {
     /// <summary>
     /// Redesigned Source Control window for Flax Editor.

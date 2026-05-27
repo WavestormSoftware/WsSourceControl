@@ -1,4 +1,4 @@
-﻿using Flax.Build;
+using Flax.Build;
 
 public class WsSourceControlEditorTarget : GameProjectEditorTarget
 {
@@ -9,6 +9,5 @@ public class WsSourceControlEditorTarget : GameProjectEditorTarget
 
         // Reference the modules for editor
         Modules.Add("WsSourceControl");
-        Modules.Add("WsSourceControlEditor");
     }
 }

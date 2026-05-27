@@ -6,10 +6,10 @@ using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.GUI.Tree;
 using FlaxEngine;
 using FlaxEngine.GUI;
-using WsSourceControlEditor.Git;
-using WsSourceControlEditor.UI;
+using WsSourceControl.Git;
+using WsSourceControl.UI;
 
-namespace WsSourceControlEditor.VcsTabs
+namespace WsSourceControl.VcsTabs
 {
     /// <summary>
     /// The Changes tab uses a 2-column horizontal split:

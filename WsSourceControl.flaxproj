@@ -1,9 +1,9 @@
-﻿{
+{
 	"Name": "WsSourceControl",
 	"Version": "1.0.0",
 	"Company": "Wavestorm Software",
 	"Copyright": "",
-	"GameTarget": "WsSourceControlTarget",
+	"GameTarget": null,
 	"EditorTarget": "WsSourceControlEditorTarget",
 	"References": [
 		{

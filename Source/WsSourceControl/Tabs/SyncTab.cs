@@ -4,9 +4,9 @@ using FlaxEditor.CustomEditors.Elements;
 using FlaxEditor.GUI;
 using FlaxEngine;
 using FlaxEngine.GUI;
-using WsSourceControlEditor.Git;
+using WsSourceControl.Git;
 
-namespace WsSourceControlEditor.VcsTabs
+namespace WsSourceControl.VcsTabs
 {
     /// <summary>
     /// The Sync tab provides remote operations (fetch/pull/push),

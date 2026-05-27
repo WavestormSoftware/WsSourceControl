@@ -1,7 +1,7 @@
 using Flax.Build;
 using Flax.Build.NativeCpp;
 
-public class WsSourceControl : GameModule
+public class WsSourceControl : GameEditorModule
 {
     /// <inheritdoc />
     public override void Setup(BuildOptions options)

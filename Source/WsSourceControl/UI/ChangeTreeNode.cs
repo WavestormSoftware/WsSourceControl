@@ -1,9 +1,9 @@
 using FlaxEditor.GUI.Tree;
 using FlaxEngine;
 using FlaxEngine.GUI;
-using WsSourceControlEditor.Git;
+using WsSourceControl.Git;
 
-namespace WsSourceControlEditor.UI
+namespace WsSourceControl.UI
 {
     /// <summary>
     /// Tree node representing a single file change (staged or unstaged).
