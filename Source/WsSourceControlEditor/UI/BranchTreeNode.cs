@@ -2,7 +2,7 @@ using FlaxEditor.GUI.Tree;
 using FlaxEngine;
 using FlaxEngine.GUI;
 
-namespace WsVersionControlEditor.UI
+namespace WsSourceControlEditor.UI
 {
     /// <summary>
     /// Tree node representing a branch (local or remote).

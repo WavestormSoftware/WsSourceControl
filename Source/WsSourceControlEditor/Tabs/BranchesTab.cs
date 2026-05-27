@@ -6,10 +6,10 @@ using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.GUI.Tree;
 using FlaxEngine;
 using FlaxEngine.GUI;
-using WsVersionControlEditor.Git;
-using WsVersionControlEditor.UI;
+using WsSourceControlEditor.Git;
+using WsSourceControlEditor.UI;
 
-namespace WsVersionControlEditor.VcsTabs
+namespace WsSourceControlEditor.VcsTabs
 {
     /// <summary>
     /// The Branches tab shows local and remote branches with

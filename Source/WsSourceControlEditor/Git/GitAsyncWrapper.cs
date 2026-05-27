@@ -4,7 +4,7 @@ using System.Threading;
 using FlaxEditor;
 using FlaxEngine;
 
-namespace WsVersionControlEditor.Git
+namespace WsSourceControlEditor.Git
 {
     public class GitAsyncWrapper
     {

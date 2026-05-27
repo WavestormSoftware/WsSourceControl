@@ -6,7 +6,7 @@ using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.GUI.Docking;
 using FlaxEngine;
 
-namespace WsVersionControlEditor
+namespace WsSourceControlEditor
 {
     public class WsSourceControlEditorPlugin : EditorPlugin
     {

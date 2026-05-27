@@ -1,10 +1,10 @@
 ﻿{
-	"Name": "WsVersionControl",
+	"Name": "WsSourceControl",
 	"Version": "1.0.0",
 	"Company": "Wavestorm Software",
 	"Copyright": "",
-	"GameTarget": "WsVersionControlTarget",
-	"EditorTarget": "WsVersionControlEditorTarget",
+	"GameTarget": "WsSourceControlTarget",
+	"EditorTarget": "WsSourceControlEditorTarget",
 	"References": [
 		{
 			"Name": "$(EnginePath)/Flax.flaxproj"

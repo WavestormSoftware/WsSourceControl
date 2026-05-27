@@ -5,7 +5,7 @@ using System.IO;
 using FlaxEngine;
 using FlaxEngine.GUI;
 
-namespace WsVersionControlEditor.Git
+namespace WsSourceControlEditor.Git
 {
     public enum GitChangeType
     {

@@ -7,10 +7,10 @@ using FlaxEditor.GUI.Input;
 using FlaxEditor.GUI.Tree;
 using FlaxEngine;
 using FlaxEngine.GUI;
-using WsVersionControlEditor.Git;
-using WsVersionControlEditor.UI;
+using WsSourceControlEditor.Git;
+using WsSourceControlEditor.UI;
 
-namespace WsVersionControlEditor.VcsTabs
+namespace WsSourceControlEditor.VcsTabs
 {
     /// <summary>
     /// The History tab shows the git commit log with search/filter

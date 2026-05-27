@@ -1,9 +1,9 @@
 using System;
 using FlaxEngine;
 using FlaxEngine.GUI;
-using WsVersionControlEditor.Git;
+using WsSourceControlEditor.Git;
 
-namespace WsVersionControlEditor.UI
+namespace WsSourceControlEditor.UI
 {
     /// <summary>
     /// A horizontal status bar showing current branch, sync status, remote, and operation state.

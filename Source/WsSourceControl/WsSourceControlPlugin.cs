@@ -1,7 +1,7 @@
 using System;
 using FlaxEngine;
 
-namespace WsVersionControl
+namespace WsSourceControl
 {
     public class WsSourceControlPlugin : GamePlugin
     {

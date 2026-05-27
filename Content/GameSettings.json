@@ -3,7 +3,7 @@
 	"TypeName": "FlaxEditor.Content.Settings.GameSettings",
 	"EngineBuild": 6167,
 	"Data": {
-	"ProductName": "WsVersionControl",
+	"ProductName": "WsSourceControl",
 	"CompanyName": "Wavestorm Software",
 	"Version": "1.0.0",
 	"FirstScene": "00000000000000000000000000000000"

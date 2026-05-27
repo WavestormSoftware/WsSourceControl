@@ -1,6 +1,6 @@
 ﻿using Flax.Build;
 
-public class WsVersionControlEditorTarget : GameProjectEditorTarget
+public class WsSourceControlEditorTarget : GameProjectEditorTarget
 {
     /// <inheritdoc />
     public override void Init()
@@ -8,7 +8,7 @@ public class WsVersionControlEditorTarget : GameProjectEditorTarget
         base.Init();
 
         // Reference the modules for editor
-        Modules.Add("WsVersionControl");
-        Modules.Add("WsVersionControlEditor");
+        Modules.Add("WsSourceControl");
+        Modules.Add("WsSourceControlEditor");
     }
 }
