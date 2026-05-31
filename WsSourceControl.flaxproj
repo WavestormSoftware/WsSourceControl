@@ -3,7 +3,7 @@
 	"Version": "1.0.0",
 	"Company": "Wavestorm Software",
 	"Copyright": "",
-	"GameTarget": null,
+	"GameTarget": "WsSourceControlTarget",
 	"EditorTarget": "WsSourceControlEditorTarget",
 	"References": [
 		{
