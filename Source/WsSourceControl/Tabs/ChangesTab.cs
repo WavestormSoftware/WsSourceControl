@@ -308,6 +308,8 @@ namespace WsSourceControl.VcsTabs
                 });
                 menu.AddButton("Discard Changes", () =>
                 {
+                    if (!ConfirmRiskyAction($"Discard changes in:\n\n{cn.FilePath}\n\nThis cannot be undone."))
+                        return;
                     GitWrapper.Reset(cn.FilePath);
                     RefreshData();
                 });
@@ -350,22 +352,19 @@ namespace WsSourceControl.VcsTabs
 
         private void OnDiscardAll()
         {
-            if (!_discardConfirmPending)
-            {
-                // First click: enter confirmation state
-                _discardConfirmPending = true;
-                _discardConfirmTimer = 3.0f; // 3 seconds to confirm
-                _discardAllBtn.Text = "Confirm Discard?";
-                _discardAllBtn.BackgroundColor = new Color(0.8f, 0.2f, 0.1f);
-                _discardAllBtn.BackgroundColorHighlighted = new Color(0.9f, 0.3f, 0.15f);
-            }
-            else
-            {
-                // Second click: actually discard
-                ResetDiscardButton();
-                GitWrapper.ResetHard();
-                RefreshData();
-            }
+            var changes = GitWrapper.GetStatus();
+            if (changes.Count == 0)
+                return;
+
+            var preview = string.Join("\n", changes.ConvertAll(x => x.FilePath));
+            if (preview.Length > 1200)
+                preview = preview.Substring(0, 1200) + "\n...";
+
+            if (!ConfirmRiskyAction($"Discard all local changes and remove untracked files?\n\n{preview}\n\nThis cannot be undone."))
+                return;
+
+            GitWrapper.ResetHard();
+            RefreshData();
         }
 
         /// <summary>
@@ -402,6 +401,9 @@ namespace WsSourceControl.VcsTabs
             }
 
             bool amend = _amendCheck?.Checked ?? false;
+            if (amend && !ConfirmRiskyAction("Amend the previous commit?\n\nThis rewrites the latest commit."))
+                return;
+
             if (amend)
                 GitWrapper.CommitAmend(msg);
             else
@@ -411,6 +413,11 @@ namespace WsSourceControl.VcsTabs
             _amendCheck.Checked = false;
             RefreshData();
             DataChanged?.Invoke();
+        }
+
+        private bool ConfirmRiskyAction(string message)
+        {
+            return MessageBox.Show(message, "Confirm Git Operation", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
         }
 
 

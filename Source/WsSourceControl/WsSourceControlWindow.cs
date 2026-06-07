@@ -69,7 +69,7 @@ namespace WsSourceControl
 
             // Initialize async wrapper for non-blocking git ops
             _asyncWrapper = new GitAsyncWrapper(
-                statusText => _statusBar?.UpdateStatus(statusText, true),
+                statusText => _statusBar?.UpdateStatus(statusText, statusText != "Ready"),
                 error => 
                 {
                     Debug.LogError($"Git error: {error}");
@@ -135,7 +135,7 @@ namespace WsSourceControl
             // Sync tab
             var syncTabRef = _tabs.AddTab(new Tab("Sync"));
             _syncTab = new SyncTab();
-            _syncTab.Build(syncTabRef);
+            _syncTab.Build(syncTabRef, _asyncWrapper);
             _syncTab.DataChanged += OnSyncDataChanged;
 
             // Initial data load

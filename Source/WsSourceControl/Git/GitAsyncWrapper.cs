@@ -6,16 +6,17 @@ using FlaxEngine;
 
 namespace WsSourceControl.Git
 {
-    public class GitAsyncWrapper
+    public sealed class GitOperationQueue : IDisposable
     {
-        private readonly ConcurrentQueue<Action> _callbackQueue = new ConcurrentQueue<Action>();
-        private int _isProcessing;
-        private Action<string> _onStatusChanged;
-        private Action<string> _onError;
+        private readonly ConcurrentQueue<Action> _mainThreadCallbacks = new ConcurrentQueue<Action>();
+        private readonly Action<string, bool> _onStatusChanged;
+        private readonly Action<GitOperationResult> _onError;
+        private CancellationTokenSource _currentCancellation;
+        private int _isBusy;
 
-        public bool IsBusy => Interlocked.CompareExchange(ref _isProcessing, 0, 0) != 0;
+        public bool IsBusy => Interlocked.CompareExchange(ref _isBusy, 0, 0) != 0;
 
-        public GitAsyncWrapper(Action<string> onStatusChanged, Action<string> onError)
+        public GitOperationQueue(Action<string, bool> onStatusChanged, Action<GitOperationResult> onError)
         {
             _onStatusChanged = onStatusChanged;
             _onError = onError;
@@ -24,64 +25,60 @@ namespace WsSourceControl.Git
 
         public void Dispose()
         {
+            Cancel();
             Editor.Instance.EditorUpdate -= ProcessCallbacks;
         }
 
-        public void RunAsync(Func<GitResult> operation, Action<GitResult> onComplete, string statusText = "Processing...")
+        public bool Enqueue(Func<CancellationToken, GitOperationResult> operation, Action<GitOperationResult> onComplete, string statusText)
         {
-            if (Interlocked.CompareExchange(ref _isProcessing, 1, 0) != 0)
-                return;
+            if (Interlocked.CompareExchange(ref _isBusy, 1, 0) != 0)
+                return false;
 
-            _onStatusChanged?.Invoke(statusText);
+            _currentCancellation = new CancellationTokenSource();
+            _onStatusChanged?.Invoke(statusText, true);
+            var token = _currentCancellation.Token;
 
             var thread = new Thread(() =>
             {
-                GitResult result;
+                GitOperationResult result;
                 try
                 {
-                    result = operation();
+                    result = token.IsCancellationRequested
+                        ? GitOperationResult.Fail("Operation cancelled.")
+                        : operation(token);
                 }
                 catch (Exception ex)
                 {
-                    result = GitResult.Fail(ex.Message);
+                    result = GitOperationResult.Fail("Git operation failed.", ex);
                 }
 
-                _callbackQueue.Enqueue(() =>
+                _mainThreadCallbacks.Enqueue(() =>
                 {
-                    Interlocked.Exchange(ref _isProcessing, 0);
-                    _onStatusChanged?.Invoke("Ready");
-
-                    if (!result.Success && !string.IsNullOrEmpty(result.Error))
-                        _onError?.Invoke(result.Error);
-
+                    _currentCancellation?.Dispose();
+                    _currentCancellation = null;
+                    Interlocked.Exchange(ref _isBusy, 0);
+                    _onStatusChanged?.Invoke("Ready", false);
+                    if (!result.Success)
+                        _onError?.Invoke(result);
                     onComplete?.Invoke(result);
                 });
             })
             {
-                IsBackground = true
+                IsBackground = true,
+                Name = "WsSourceControl Git Operation"
             };
             thread.Start();
+            return true;
         }
 
-        public void RunAsync(Action action, Action onComplete, string statusText = "Processing...")
+        public void Cancel()
         {
-            RunAsync(() =>
-            {
-                try
-                {
-                    action();
-                    return GitResult.Ok(string.Empty, string.Empty, 0);
-                }
-                catch (Exception ex)
-                {
-                    return GitResult.Fail(ex.Message);
-                }
-            }, _ => onComplete?.Invoke(), statusText);
+            _currentCancellation?.Cancel();
         }
 
         private void ProcessCallbacks()
         {
-            while (_callbackQueue.TryDequeue(out var callback))
+            while (_mainThreadCallbacks.TryDequeue(out var callback))
             {
                 try
                 {
@@ -89,9 +86,53 @@ namespace WsSourceControl.Git
                 }
                 catch (Exception ex)
                 {
-                    FlaxEngine.Debug.LogError($"GitAsync callback error: {ex.Message}");
+                    Debug.LogError($"Git operation callback error: {ex.Message}");
                 }
             }
+        }
+    }
+
+    public sealed class GitAsyncWrapper : IDisposable
+    {
+        private readonly GitOperationQueue _queue;
+
+        public bool IsBusy => _queue.IsBusy;
+
+        public GitAsyncWrapper(Action<string> onStatusChanged, Action<string> onError)
+        {
+            _queue = new GitOperationQueue(
+                (text, busy) => onStatusChanged?.Invoke(busy ? text : "Ready"),
+                result => onError?.Invoke(result.Error));
+        }
+
+        public void Dispose()
+        {
+            _queue.Dispose();
+        }
+
+        public void RunAsync(Func<GitResult> operation, Action<GitResult> onComplete, string statusText = "Processing")
+        {
+            _queue.Enqueue(_ =>
+            {
+                try
+                {
+                    var result = operation();
+                    return result.Success ? GitOperationResult.Ok(result.Output) : GitOperationResult.Fail(result.Error);
+                }
+                catch (Exception ex)
+                {
+                    return GitOperationResult.Fail("Git operation failed.", ex);
+                }
+            }, result => onComplete?.Invoke(GitResult.FromOperation(result)), statusText);
+        }
+
+        public void RunAsync(Action action, Action onComplete, string statusText = "Processing")
+        {
+            _queue.Enqueue(_ =>
+            {
+                action();
+                return GitOperationResult.Ok();
+            }, _ => onComplete?.Invoke(), statusText);
         }
     }
 }

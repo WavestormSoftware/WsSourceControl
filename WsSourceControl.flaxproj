@@ -1,6 +1,6 @@
 {
 	"Name": "WsSourceControl",
-	"Version": "1.0.0",
+	"Version": "0.2.0",
 	"Company": "Wavestorm Software",
 	"Copyright": "",
 	"GameTarget": "WsSourceControlTarget",
@@ -23,6 +23,6 @@
 			"Z": 0.0
 		}
 	},
-	"MinEngineVersion": "0.0.6167",
+	"MinEngineVersion": "1.12.0",
 	"EngineNickname": null
 }

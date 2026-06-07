@@ -16,6 +16,7 @@ namespace WsSourceControl.VcsTabs
     {
         private ContainerControl _stashContainer;
         private ContainerControl _conflictContainer;
+        private GitAsyncWrapper _asyncWrapper;
 
         /// <summary>
         /// Called when sync operations change the working tree state.
@@ -25,8 +26,10 @@ namespace WsSourceControl.VcsTabs
         /// <summary>
         /// Builds the Sync tab UI inside the given Tab control.
         /// </summary>
-        public void Build(FlaxEditor.GUI.Tabs.Tab tab)
+        public void Build(FlaxEditor.GUI.Tabs.Tab tab, GitAsyncWrapper asyncWrapper = null)
         {
+            _asyncWrapper = asyncWrapper;
+
             var container = new Panel(ScrollBars.Vertical)
             {
                 AnchorPreset = AnchorPresets.StretchAll,
@@ -64,25 +67,19 @@ namespace WsSourceControl.VcsTabs
             var fetchBtn = new Button { Text = "Fetch", Parent = syncActionsRow, Width = 80 };
             fetchBtn.Clicked += () =>
             {
-                GitWrapper.Fetch();
-                RefreshData();
-                DataChanged?.Invoke();
+                RunRemote(GitWrapper.Fetch, "Fetching...");
             };
 
             var pullBtn = new Button { Text = "Pull", Parent = syncActionsRow, Width = 80, BackgroundColor = new Color(0.2f, 0.55f, 0.2f), BackgroundColorHighlighted = new Color(0.25f, 0.65f, 0.25f) };
             pullBtn.Clicked += () =>
             {
-                GitWrapper.Pull();
-                RefreshData();
-                DataChanged?.Invoke();
+                RunRemote(GitWrapper.Pull, "Pulling...");
             };
 
             var pushBtn = new Button { Text = "Push", Parent = syncActionsRow, Width = 80, BackgroundColor = new Color(0.55f, 0.3f, 0.15f), BackgroundColorHighlighted = new Color(0.65f, 0.35f, 0.18f) };
             pushBtn.Clicked += () =>
             {
-                GitWrapper.Push();
-                RefreshData();
-                DataChanged?.Invoke();
+                RunRemote(GitWrapper.Push, "Pushing...");
             };
 
             var stashHeader = new Label
@@ -137,6 +134,8 @@ namespace WsSourceControl.VcsTabs
             };
             popBtn.Clicked += () =>
             {
+                if (!ConfirmRiskyAction("Pop the latest stash?\n\nThis applies the stash and removes it if successful."))
+                    return;
                 GitWrapper.StashPop();
                 RefreshData();
                 DataChanged?.Invoke();
@@ -232,6 +231,8 @@ namespace WsSourceControl.VcsTabs
                 int idx = stash.Index;
                 dropBtn.Clicked += () =>
                 {
+                    if (!ConfirmRiskyAction($"Drop stash@{{{idx}}}?\n\nThis cannot be undone from the plugin."))
+                        return;
                     GitWrapper.StashDrop(idx);
                     RefreshData();
                     DataChanged?.Invoke();
@@ -264,7 +265,9 @@ namespace WsSourceControl.VcsTabs
                 };
                 popBtn.Clicked += () =>
                 {
-                    GitWrapper.StashPop();
+                    if (!ConfirmRiskyAction($"Pop stash@{{{idx}}}?\n\nThis applies the stash and removes it if successful."))
+                        return;
+                    GitWrapper.StashPop(idx);
                     RefreshData();
                     DataChanged?.Invoke();
                 };
@@ -360,6 +363,28 @@ namespace WsSourceControl.VcsTabs
 
                 row.PerformLayout();
             }
+        }
+
+        private void RunRemote(Func<GitResult> operation, string statusText)
+        {
+            if (_asyncWrapper == null)
+            {
+                operation();
+                RefreshData();
+                DataChanged?.Invoke();
+                return;
+            }
+
+            _asyncWrapper.RunAsync(operation, result =>
+            {
+                RefreshData();
+                DataChanged?.Invoke();
+            }, statusText);
+        }
+
+        private bool ConfirmRiskyAction(string message)
+        {
+            return MessageBox.Show(message, "Confirm Git Operation", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
         }
     }
 }

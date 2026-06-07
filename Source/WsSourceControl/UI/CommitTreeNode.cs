@@ -16,7 +16,8 @@ namespace WsSourceControl.UI
         public CommitTreeNode(GitLogEntry entry)
         {
             Entry = entry;
-            Text = $"{entry.Hash}  {entry.Date}  {entry.Author}";
+            var shortHash = string.IsNullOrEmpty(entry.Hash) ? string.Empty : entry.Hash.Substring(0, System.Math.Min(8, entry.Hash.Length));
+            Text = $"{shortHash}  {entry.Date}  {entry.Author}";
         }
 
         /// <summary>

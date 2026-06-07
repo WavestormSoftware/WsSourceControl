@@ -2,64 +2,108 @@
   <img src="Media/WSCBanner.png" alt="WsSourceControl Banner" width="100%" />
 </div>
 
-# WsSourceControl - Flax Engine Plugin
+# WsSourceControl
 
-A simple [Flax Engine](https://flaxengine.com/) plugin that adds a basic Git-based source control overview directly inside the Flax Editor. (Ws stands for Wavestorm).
+WsSourceControl is a Flax Engine 1.12+ editor plugin that adds a dockable Git source-control panel to the Flax Editor.
 
-<details>
-<summary><b>View Screenshot</b></summary>
-<br>
-<img src="Media/Screenshot.png" alt="WsSourceControl Screenshot" width="800" />
-</details>
+Version `0.2.0` rewrites the core Git integration around LibGit2Sharp instead of ad-hoc shell command strings. The plugin is still beta, but the main workflows are now structured around typed Git operations, background remote sync, native confirmation dialogs for risky actions, and Flax-aware repository setup.
+
+## Requirements
+
+- Flax Engine 1.12 or newer
+- Windows x64 or Linux x64 editor
+- Existing Git credentials configured outside the plugin for private remotes
+
+## Included Dependencies
+
+The plugin vendors the runtime files needed by Flax plugin projects:
+
+- `ThirdParty/LibGit2Sharp/net8.0/LibGit2Sharp.dll`
+- `ThirdParty/LibGit2Sharp/net8.0/LibGit2Sharp.dll.config`
+- `ThirdParty/LibGit2Sharp/runtimes/linux-x64/native/libgit2-3f4182d.so`
+- `ThirdParty/LibGit2Sharp/runtimes/win-x64/native/git2-3f4182d.dll`
+- LibGit2Sharp and libgit2 license files under `ThirdParty/LibGit2Sharp/licenses/`
+
+Do not rely on generated `.csproj` NuGet restore for distribution. Flax uses `WsSourceControl.Build.cs` to reference and copy these files.
 
 ## Features
 
-- **Editor toolbar integration** — Source Control button in the ToolStrip and Window menu (F8 shortcut)
-- **Top Toolbar** — Quick access to Refresh, Fetch, Pull, and Push operations directly from any tab
-- **Bottom Status Bar** — Constant visibility of current branch, ahead/behind status, and async operation progress
-- **Changes tab** — Staged/unstaged file trees with color-coded change types, right-click context menus (stage, unstage, discard, open in explorer), inline diff viewer, and commit with amend support
-- **History tab** — Commit log browser with search/filter by hash, author, or message, and a detail panel showing full commit info and changed files
-- **Branches tab** — Local and remote branch listing, checkout, delete, create new branch with auto-checkout
-- **Sync tab** — Stash management (stash, pop, apply, drop list), merge conflict detection and file listing
-- **Git initialization** — One-click Git repo initialization if the project isn't already a Git repository
-- **Async git operations** — Background thread execution with main-thread callback marshalling for non-blocking UI and error popups
+- Editor ToolStrip and Window menu entry with `F8` shortcut
+- Dockable Source Control window
+- Repository status snapshot with branch, upstream, ahead/behind, remote, conflict, and LFS indicators
+- Changes tab with staged and unstaged trees, directory grouping, diff viewer, stage/unstage, commit, amend, discard selected, and discard all
+- Guarded risky operations for discard, reset hard, amend, branch delete, stash pop, and stash drop
+- History tab with search, commit detail, changed files, copy hash, and create-branch-from-commit action
+- Branches tab with local/remote branches, current branch, upstream, ahead/behind, checkout, create, and guarded delete
+- Sync tab with background fetch, pull, and push
+- Stash list with save, apply, guarded pop, and guarded drop
+- Merge conflict list with open-in-explorer actions
+- No-repo flow with repository initialization and Flax `.gitignore` defaults
+- Git LFS detection and guidance for LFS-tracked files and pointer files
+
+## Git LFS
+
+WsSourceControl detects `.gitattributes` entries using `filter=lfs` and detects Git LFS pointer files. It does not install Git LFS or manage `git lfs track` rules in this pass.
+
+For large binary assets, configure Git LFS with the normal Git LFS tooling outside the plugin.
+
+## Authentication
+
+The plugin does not store tokens, passwords, PATs, or SSH key paths. Remote operations use credentials already configured for Git/libgit2 on the machine. Authentication failures are surfaced as operation errors in the editor.
 
 ## Installation
-#### Requirements
-- FlaxEngine `v. 1.12` or above
-- Git installed and available in PATH
 
-#### The easy way:
-- In the Flax Editor, go to `Tools > Plugins > Clone Project`
-- Paste this repo link `https://github.com/WavestormSoftware/WsSourceControl.git` into the `Git Path`
-- Click `Clone`
-- Restart the Editor
-- Done
+### Clone Through Flax
 
-#### Manual installation:
-- Close the Editor
-- Clone this repo into `<your-game-project-folder>\Plugins\WsSourceControl\`
-- Add a reference to WsSourceControl to your game by modifying the `<your-game>.flaxproj` file:
+1. Open `Tools > Plugins`.
+2. Use `Clone Project`.
+3. Enter `https://github.com/WavestormSoftware/WsSourceControl.git`.
+4. Restart the editor.
+
+### Manual
+
+1. Close Flax Editor.
+2. Clone or copy this repository into `<your-game-project>/Plugins/WsSourceControl/`.
+3. Add the plugin reference to your game `.flaxproj`:
+
 ```json
-...
 "References": [
-    {
-        "Name": "$(EnginePath)/Flax.flaxproj"
-    },
-    {
-        "Name": "$(ProjectPath)/Plugins/WsSourceControl/WsSourceControl.flaxproj"
-    }
+  {
+    "Name": "$(EnginePath)/Flax.flaxproj"
+  },
+  {
+    "Name": "$(ProjectPath)/Plugins/WsSourceControl/WsSourceControl.flaxproj"
+  }
 ]
-...
 ```
-- Restart the Editor
-- Done
 
-## Support & Issues
+4. Restart Flax Editor.
 
-If you encounter any bugs, crashes, or have feature requests, please feel free to open an issue on the GitHub repository!
+## Development
+
+Build the generated Flax C# project locally:
+
+```bash
+dotnet build Source/WsSourceControl.csproj -c Editor.Linux.Development
+```
+
+Run the standalone Git core tests:
+
+```bash
+dotnet run --project Tests/WsSourceControl.Tests/WsSourceControl.Tests.csproj
+```
+
+The generated Flax `.csproj` remains ignored. If Flax regenerates project files, it will pick up plugin source files and the LibGit2Sharp reference from `Source/WsSourceControl/WsSourceControl.Build.cs`.
+
+## Limitations
+
+- macOS packaging is not included yet.
+- Rebase, cherry-pick, revert, merge conflict editing, remote branch deletion, and force push are intentionally out of scope for this pass.
+- The plugin does not replace Flax content browser or asset import workflows.
+- Remote authentication depends on system/user Git credential configuration.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-Copyright © Wavestorm Software.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
+
+LibGit2Sharp and libgit2 licenses are included under `ThirdParty/LibGit2Sharp/licenses/`.

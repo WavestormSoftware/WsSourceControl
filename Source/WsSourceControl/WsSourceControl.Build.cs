@@ -1,3 +1,4 @@
+using System.IO;
 using Flax.Build;
 using Flax.Build.NativeCpp;
 
@@ -8,10 +9,12 @@ public class WsSourceControl : GameEditorModule
     {
         base.Setup(options);
 
-        // Here you can modify the build options for your game module
-        // To reference another module use: options.PublicDependencies.Add("Audio");
-        // To add C++ define use: options.PublicDefinitions.Add("COMPILE_WITH_FLAX");
-        // To learn more see scripting documentation.
         BuildNativeCode = false;
+
+        var thirdParty = Path.Combine(FolderPath, "..", "..", "ThirdParty", "LibGit2Sharp");
+        options.ScriptingAPI.FileReferences.Add(Path.Combine(thirdParty, "net8.0", "LibGit2Sharp.dll"));
+        options.DependencyFiles.Add(Path.Combine(thirdParty, "net8.0", "LibGit2Sharp.dll.config"));
+        options.DependencyFiles.Add(Path.Combine(thirdParty, "runtimes", "linux-x64", "native", "libgit2-3f4182d.so"));
+        options.DependencyFiles.Add(Path.Combine(thirdParty, "runtimes", "win-x64", "native", "git2-3f4182d.dll"));
     }
 }

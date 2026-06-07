@@ -148,13 +148,24 @@ namespace WsSourceControl.UI
 
         public void RefreshFromGit()
         {
-            string branch = GitWrapper.GetCurrentBranch();
-            UpdateBranch(branch);
+            var snapshot = GitWrapper.GetSnapshot();
+            if (!snapshot.IsRepository)
+            {
+                UpdateBranch("No Repository");
+                UpdateSyncStatus(0, 0);
+                UpdateRemote(string.Empty);
+                return;
+            }
 
-            GitWrapper.GetAheadBehind(out int ahead, out int behind);
-            UpdateSyncStatus(ahead, behind);
+            UpdateBranch(snapshot.BranchName);
 
-            string remote = GitWrapper.GetRemoteUrl();
+            UpdateSyncStatus(snapshot.Ahead, snapshot.Behind);
+
+            var remote = snapshot.RemoteUrl;
+            if (snapshot.HasConflicts)
+                remote = string.IsNullOrEmpty(remote) ? "Conflicts detected" : $"{remote}  |  Conflicts detected";
+            else if (snapshot.HasLfsConfigured)
+                remote = string.IsNullOrEmpty(remote) ? "Git LFS detected" : $"{remote}  |  LFS";
             UpdateRemote(remote);
         }
     }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using FlaxEditor.CustomEditors.Elements;
 using FlaxEditor.GUI;
+using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.GUI.Input;
 using FlaxEditor.GUI.Tree;
 using FlaxEngine;
@@ -87,6 +88,7 @@ namespace WsSourceControl.VcsTabs
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
             };
             _historyTree.SelectedChanged += OnHistorySelectionChanged;
+            _historyTree.RightClick += OnHistoryRightClick;
 
             var rightContainer = new ContainerControl
             {
@@ -116,6 +118,25 @@ namespace WsSourceControl.VcsTabs
                 BorderColor = Style.Current.BorderNormal,
                 TextColor = Style.Current.Foreground,
             };
+        }
+
+        private void OnHistoryRightClick(TreeNode node, Float2 location)
+        {
+            if (node is not CommitTreeNode commitNode)
+                return;
+
+            var menu = new ContextMenu();
+            menu.AddButton("Copy Hash", () =>
+            {
+                Clipboard.Text = commitNode.Entry.Hash;
+            });
+            menu.AddButton("Create Branch From Commit", () =>
+            {
+                var branchName = $"branch-{commitNode.Entry.Hash}";
+                if (GitWrapper.CreateBranch(branchName, commitNode.Entry.Hash))
+                    RefreshData();
+            });
+            menu.Show(_historyTree, location);
         }
 
 

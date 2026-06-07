@@ -12,6 +12,7 @@ imgui.ini
 
 # Ignore Visual Studio project files (generated locally)
 *.csproj
+!Tests/**/*.csproj
 *.sln
 launchSettings.json
 
@@ -47,6 +48,8 @@ Thumbs.db
 *.lib
 *.sbr
 /Source/obj/
+/Tests/**/obj/
+/Tests/**/bin/
 _ReSharper*/
 [Tt]est[Rr]esult*
 .vs/

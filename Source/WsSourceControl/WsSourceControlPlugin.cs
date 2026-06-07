@@ -6,11 +6,14 @@ using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.GUI.Docking;
 using FlaxEngine;
 using WsSourceControl;
+using WsSourceControl.Git;
 
 namespace WsSourceControlEditor
 {
     public class WsSourceControlPlugin : EditorPlugin
     {
+        public const string SettingsName = "WsSourceControl";
+
         private ToolStripButton _toolstripButton;
         private ContextMenuButton _menuButton;
         private WsSourceControlWindow _window;
@@ -25,10 +28,10 @@ namespace WsSourceControlEditor
                 AuthorUrl = "https://github.com/WavestormSoftware",
                 RepositoryUrl = "https://github.com/WavestormSoftware/WsSourceControl",
                 HomepageUrl = "https://github.com/WavestormSoftware/WsSourceControl",
-                Description = "Professional Git-based source control GUI for Flax Engine.",
-                Version = new Version(2, 0),
+                Description = "Git source control panel for Flax Engine.",
+                Version = new Version(0, 2, 0),
                 IsAlpha = false,
-                IsBeta = false,
+                IsBeta = true,
             };
         }
 
@@ -42,6 +45,8 @@ namespace WsSourceControlEditor
             _menuButton = Editor.UI.MenuWindow.ContextMenu.AddButton("Source Control");
             _menuButton.ShortKeys = "F8";
             _menuButton.Clicked += OnOpenSourceControl;
+
+            Editor.Options.AddCustomSettings(SettingsName, () => new WsSourceControlSettings());
         }
 
         public override void DeinitializeEditor()
@@ -63,6 +68,8 @@ namespace WsSourceControlEditor
                 _menuButton.Dispose();
                 _menuButton = null;
             }
+
+            Editor.Options.RemoveCustomSettings(SettingsName);
 
             base.DeinitializeEditor();
         }
