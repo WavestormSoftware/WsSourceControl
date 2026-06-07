@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using FlaxEditor.CustomEditors.Elements;
 using FlaxEditor.GUI;
 using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.GUI.Tree;
@@ -11,25 +9,17 @@ using WsSourceControl.UI;
 
 namespace WsSourceControl.VcsTabs
 {
-    /// <summary>
-    /// The Branches tab shows local and remote branches with
-    /// checkout, create, and delete operations.
-    /// </summary>
     public class BranchesTab
     {
         private Tree _branchTree;
         private TextBox _newBranchBox;
         private Label _remoteLabel;
-        private Label _localHeader;
+        private Label _validationLabel;
+        private Button _createButton;
+        private SectionHeader _branchHeader;
 
-        /// <summary>
-        /// Called when branch operations change the working tree state.
-        /// </summary>
         public event Action DataChanged;
 
-        /// <summary>
-        /// Builds the Branches tab UI inside the given Tab control.
-        /// </summary>
         public void Build(FlaxEditor.GUI.Tabs.Tab tab)
         {
             var container = new ContainerControl
@@ -39,22 +29,36 @@ namespace WsSourceControl.VcsTabs
                 Parent = tab,
             };
 
-            _localHeader = new Label
+            var remoteHeader = new SectionHeader("Remote")
             {
-                Text = "Local Branches",
                 Parent = container,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
                 Offsets = Margin.Zero,
-                Height = 24,
+            };
+
+            _remoteLabel = new Label
+            {
+                Parent = container,
+                Text = "(loading...)",
+                TextColor = SourceControlTheme.MutedText,
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = new Margin(8, 8, SourceControlTheme.SectionHeaderHeight, SourceControlTheme.CompactRowHeight),
                 HorizontalAlignment = TextAlignment.Near,
-                Margin = new Margin(4, 0, 0, 0),
+                VerticalAlignment = TextAlignment.Center,
+            };
+
+            _branchHeader = new SectionHeader("Branches")
+            {
+                Parent = container,
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = new Margin(0, 0, SourceControlTheme.SectionHeaderHeight + SourceControlTheme.CompactRowHeight, SourceControlTheme.SectionHeaderHeight),
             };
 
             var branchScroll = new Panel(ScrollBars.Both)
             {
                 Parent = container,
                 AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = new Margin(0, 0, 24, 120), // Leave 120px at bottom for Remote and Create sections
+                Offsets = new Margin(0, 0, SourceControlTheme.SectionHeaderHeight * 2f + SourceControlTheme.CompactRowHeight, 42),
             };
 
             _branchTree = new Tree(false)
@@ -64,66 +68,46 @@ namespace WsSourceControl.VcsTabs
             };
             _branchTree.RightClick += OnBranchRightClick;
 
-            // Bottom area
-            var bottomArea = new ContainerControl
+            var createRow = new PinnedBottomPanel
             {
                 Parent = container,
-                AnchorPreset = AnchorPresets.HorizontalStretchBottom,
-                Offsets = new Margin(0, 0, -120, 120),
+                PinHeight = 42f,
             };
+            createRow.LayoutChildren = LayoutCreateRow;
 
-            var remoteHeader = new Label
+            _validationLabel = new Label
             {
-                Text = "Remote",
-                Parent = bottomArea,
+                Parent = createRow,
+                Text = string.Empty,
+                TextColor = SourceControlTheme.Warning,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = Margin.Zero,
-                Height = 24,
+                Offsets = new Margin(8, 150, 0, 16),
                 HorizontalAlignment = TextAlignment.Near,
-                Margin = new Margin(4, 0, 0, 0),
-            };
-
-            _remoteLabel = new Label
-            {
-                Parent = bottomArea,
-                Text = "(loading...)",
-                TextColor = Style.Current.ForegroundGrey,
-                AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = new Margin(0, 0, 24, 24),
-                HorizontalAlignment = TextAlignment.Near,
-                Margin = new Margin(8, 0, 0, 0),
-            };
-
-            var createHeader = new Label
-            {
-                Text = "Create Branch",
-                Parent = bottomArea,
-                AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = new Margin(0, 0, 52, 24),
-                HorizontalAlignment = TextAlignment.Near,
-                Margin = new Margin(4, 0, 0, 0),
             };
 
             _newBranchBox = new TextBox(false, 0, 0, 0)
             {
-                Parent = bottomArea,
-                AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = new Margin(8, 150, 76, 20),
+                Parent = createRow,
+                AnchorPreset = AnchorPresets.HorizontalStretchBottom,
+                Offsets = new Margin(8, 146, 17, 22),
                 WatermarkText = "New branch name...",
             };
 
-            var createBtn = new Button
-            {
-                Text = "Create & Checkout",
-                Parent = bottomArea,
-                AnchorPreset = AnchorPresets.TopRight,
-                Offsets = new Margin(-140, 136, 76, 20),
-                BackgroundColor = Style.Current.BackgroundSelected,
-                BackgroundColorHighlighted = Style.Current.BackgroundSelected.RGBMultiplied(1.2f),
-            };
-            createBtn.Clicked += OnCreateBranch;
+            _createButton = UiActions.PrimaryButton("Create & Checkout", OnCreateBranch, 132f, "Create branch and check it out");
+            _createButton.Parent = createRow;
         }
 
+        private void LayoutCreateRow(PinnedBottomPanel row)
+        {
+            var pad = SourceControlTheme.Padding;
+            var buttonWidth = _createButton?.Width ?? 132f;
+            if (_validationLabel != null)
+                _validationLabel.Bounds = new Rectangle(pad, 0f, Math.Max(80f, row.Width - buttonWidth - pad * 3f), 16f);
+            if (_newBranchBox != null)
+                _newBranchBox.Bounds = new Rectangle(pad, 17f, Math.Max(80f, row.Width - buttonWidth - pad * 3f), SourceControlTheme.ButtonHeight);
+            if (_createButton != null)
+                _createButton.Bounds = new Rectangle(row.Width - buttonWidth - pad, 17f, buttonWidth, SourceControlTheme.ButtonHeight);
+        }
 
         private void OnBranchRightClick(TreeNode node, Float2 location)
         {
@@ -134,7 +118,7 @@ namespace WsSourceControl.VcsTabs
             {
                 menu.AddButton("Checkout", () =>
                 {
-                    if (GitWrapper.GetStatus().Count > 0 && !ConfirmRiskyAction("Checkout another branch with local changes present?\n\nCommit, stash, or discard changes first if you want a clean checkout."))
+                    if (GitWrapper.GetStatus().Count > 0 && !UiActions.ConfirmDanger("Checkout another branch with local changes present?\n\nCommit, stash, or discard changes first if you want a clean checkout."))
                         return;
                     GitWrapper.CheckoutBranch(branchNode.BranchName);
                     RefreshData();
@@ -143,7 +127,7 @@ namespace WsSourceControl.VcsTabs
 
                 menu.AddButton("Delete", () =>
                 {
-                    if (!ConfirmRiskyAction($"Delete local branch '{branchNode.BranchName}'?\n\nThis cannot be undone from the plugin."))
+                    if (!UiActions.ConfirmDanger($"Delete local branch '{branchNode.BranchName}'?\n\nThis cannot be undone from the plugin."))
                         return;
                     GitWrapper.DeleteBranch(branchNode.BranchName);
                     RefreshData();
@@ -154,11 +138,8 @@ namespace WsSourceControl.VcsTabs
             {
                 menu.AddButton("Create From Here...", () =>
                 {
-                    if (_newBranchBox != null)
-                    {
-                        _newBranchBox.Text = string.Empty;
-                        _newBranchBox.Focus();
-                    }
+                    _newBranchBox.Text = string.Empty;
+                    _newBranchBox.Focus();
                 });
             }
 
@@ -166,7 +147,7 @@ namespace WsSourceControl.VcsTabs
             {
                 menu.AddButton("Checkout as Local", () =>
                 {
-                    if (GitWrapper.GetStatus().Count > 0 && !ConfirmRiskyAction("Checkout this remote branch with local changes present?\n\nCommit, stash, or discard changes first if you want a clean checkout."))
+                    if (GitWrapper.GetStatus().Count > 0 && !UiActions.ConfirmDanger("Checkout this remote branch with local changes present?\n\nCommit, stash, or discard changes first if you want a clean checkout."))
                         return;
                     GitWrapper.CheckoutBranch(branchNode.BranchName);
                     RefreshData();
@@ -179,13 +160,14 @@ namespace WsSourceControl.VcsTabs
 
         private void OnCreateBranch()
         {
-            string name = _newBranchBox?.Text?.Trim() ?? string.Empty;
+            var name = _newBranchBox?.Text?.Trim() ?? string.Empty;
             if (string.IsNullOrWhiteSpace(name))
             {
-                Debug.LogWarning("Branch name cannot be empty.");
+                _validationLabel.Text = "Branch name is required.";
                 return;
             }
 
+            _validationLabel.Text = string.Empty;
             if (GitWrapper.CreateBranch(name))
             {
                 _newBranchBox.Text = string.Empty;
@@ -194,18 +176,16 @@ namespace WsSourceControl.VcsTabs
             }
         }
 
-
-        /// <summary>
-        /// Refresh branch list and remote info.
-        /// </summary>
         public void RefreshData()
         {
             PopulateBranchTree();
 
             if (_remoteLabel != null)
             {
-                string remote = GitWrapper.GetRemoteUrl();
-                _remoteLabel.Text = string.IsNullOrEmpty(remote) ? "(No remote configured)" : remote;
+                var snapshot = GitWrapper.GetSnapshot();
+                var remote = string.IsNullOrEmpty(snapshot.RemoteUrl) ? "No remote configured" : snapshot.RemoteUrl;
+                var upstream = string.IsNullOrEmpty(snapshot.UpstreamName) ? "No upstream" : snapshot.UpstreamName;
+                _remoteLabel.Text = $"{remote}  |  {upstream}  |  Up {snapshot.Ahead} Down {snapshot.Behind}";
             }
         }
 
@@ -215,39 +195,39 @@ namespace WsSourceControl.VcsTabs
             _branchTree.DisposeChildren();
 
             var branches = GitWrapper.GetBranchInfos();
-            var localBranches = branches.FindAll(x => !x.IsRemote);
+            var localCount = 0;
+            var remoteCount = 0;
 
-            int localCount = 0;
-            foreach (var branch in localBranches)
+            foreach (var branch in branches)
             {
-                var node = new BranchTreeNode(branch.FriendlyName, branch.IsCurrent, false);
-                var sync = branch.Ahead != 0 || branch.Behind != 0 ? $"  Up {branch.Ahead} Down {branch.Behind}" : string.Empty;
-                var upstream = string.IsNullOrEmpty(branch.UpstreamName) ? string.Empty : $"  -> {branch.UpstreamName}";
-                node.Text = $"{node.Text}{upstream}{sync}";
-                node.Parent = _branchTree;
+                if (branch.IsRemote)
+                    continue;
+
+                new BranchTreeNode(branch.FriendlyName, branch.IsCurrent, false, branch.UpstreamName, branch.Ahead, branch.Behind).Parent = _branchTree;
                 localCount++;
             }
 
-            var remoteBranches = branches.FindAll(x => x.IsRemote);
-            if (remoteBranches.Count > 0)
+            var remoteNode = new TreeNode
             {
-                var remoteNode = new TreeNode { Text = $"Remotes ({remoteBranches.Count})" };
-                remoteNode.Parent = _branchTree;
-                remoteNode.Expand();
+                Text = "Remotes",
+                TextColor = SourceControlTheme.MutedText,
+            };
+            remoteNode.Parent = _branchTree;
 
-                foreach (var branch in remoteBranches)
-                    new BranchTreeNode(branch.FriendlyName, false, true).Parent = remoteNode;
+            foreach (var branch in branches)
+            {
+                if (!branch.IsRemote)
+                    continue;
+
+                new BranchTreeNode(branch.FriendlyName, false, true, branch.UpstreamName, branch.Ahead, branch.Behind).Parent = remoteNode;
+                remoteCount++;
             }
 
+            if (remoteCount > 0)
+                remoteNode.Expand();
+
             _branchTree.PerformLayout();
-
-            if (_localHeader != null)
-                _localHeader.Text = $"Local Branches ({localCount})";
-        }
-
-        private bool ConfirmRiskyAction(string message)
-        {
-            return MessageBox.Show(message, "Confirm Git Operation", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+            _branchHeader?.SetSubtitle($"{localCount} local, {remoteCount} remote");
         }
     }
 }

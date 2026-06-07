@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using FlaxEditor.CustomEditors.Elements;
 using FlaxEditor.GUI;
 using FlaxEditor.GUI.ContextMenu;
+using FlaxEditor.GUI.Input;
 using FlaxEditor.GUI.Tree;
 using FlaxEngine;
 using FlaxEngine.GUI;
@@ -11,13 +11,6 @@ using WsSourceControl.UI;
 
 namespace WsSourceControl.VcsTabs
 {
-    /// <summary>
-    /// The Changes tab uses a 2-column horizontal split:
-    ///   Left:  Staged + Unstaged file trees in a single scrollable panel
-    ///   Right: Diff viewer + Commit form in a single scrollable panel
-    /// This avoids the 4-quadrant problem of too many scrollable containers.
-    /// All buttons use GroupElement.Button() for proper DropPanel layout.
-    /// </summary>
     public class ChangesTab
     {
         private Tree _stagedTree;
@@ -26,28 +19,24 @@ namespace WsSourceControl.VcsTabs
         private CheckBox _amendCheck;
         private TextBox _diffTextBox;
         private Label _diffFileLabel;
-        private Label _stagedHeader;
-        private Label _unstagedHeader;
-        private Button _discardAllBtn;
-        private bool _discardConfirmPending;
-        private float _discardConfirmTimer;
+        private SectionHeader _stagedHeader;
+        private SectionHeader _unstagedHeader;
+        private SectionHeader _commitHeader;
+        private SearchBox _filterBox;
+        private Button _commitButton;
+        private Label _stagedEmptyLabel;
+        private Label _unstagedEmptyLabel;
+        private int _stagedCount;
 
-        /// <summary>
-        /// Called when data should be refreshed (e.g., after a commit).
-        /// </summary>
         public event Action DataChanged;
 
-        /// <summary>
-        /// Builds the Changes tab UI inside the given Tab control.
-        /// </summary>
         public void Build(FlaxEditor.GUI.Tabs.Tab tab)
         {
-            // Horizontal split: left = file trees, right = diff + commit
             var mainSplit = new SplitPanel(Orientation.Horizontal, ScrollBars.None, ScrollBars.None)
             {
                 AnchorPreset = AnchorPresets.StretchAll,
                 Offsets = Margin.Zero,
-                SplitterValue = 0.45f,
+                SplitterValue = 0.4f,
                 Parent = tab,
             };
 
@@ -55,44 +44,47 @@ namespace WsSourceControl.VcsTabs
             BuildDetailPanel(mainSplit.Panel2);
         }
 
-
         private void BuildFileListPanel(ContainerControl parent)
         {
+            var filterRow = new ContainerControl
+            {
+                Parent = parent,
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = new Margin(0, 0, 0, 36),
+            };
+
+            _filterBox = new SearchBox
+            {
+                Parent = filterRow,
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = new Margin(6, 6, 6, 24),
+                WatermarkText = "Filter changed files...",
+            };
+            _filterBox.TextChanged += PopulateChangesTrees;
+
             var verticalSplit = new SplitPanel(Orientation.Vertical, ScrollBars.None, ScrollBars.None)
             {
                 AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = Margin.Zero,
+                Offsets = new Margin(0, 0, 36, 0),
                 SplitterValue = 0.5f,
                 Parent = parent,
             };
 
             var stagedContainer = new ContainerControl { AnchorPreset = AnchorPresets.StretchAll, Offsets = Margin.Zero, Parent = verticalSplit.Panel1 };
-            
-            _stagedHeader = new Label
+            _stagedHeader = new SectionHeader("Staged")
             {
-                Text = "Staged Changes (0)",
                 Parent = stagedContainer,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = Margin.Zero,
-                Height = 24,
-                HorizontalAlignment = TextAlignment.Near,
-                Margin = new Margin(4, 0, 0, 0),
+                Offsets = new Margin(0, 0, 0, SourceControlTheme.SectionHeaderHeight),
+                Height = SourceControlTheme.SectionHeaderHeight,
             };
-
-            var unstageAllBtn = new Button
-            {
-                Text = "Unstage All",
-                Parent = stagedContainer,
-                AnchorPreset = AnchorPresets.TopRight,
-                Offsets = new Margin(-86, 84, 2, 20),
-            };
-            unstageAllBtn.Clicked += OnUnstageAll;
+            _stagedHeader.AddAction(UiActions.Button("Unstage All", OnUnstageAll, 92f, "Unstage all staged files"));
 
             var stagedScroll = new Panel(ScrollBars.Both)
             {
                 Parent = stagedContainer,
                 AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = new Margin(0, 0, 24, 0),
+                Offsets = new Margin(0, 0, SourceControlTheme.SectionHeaderHeight, 0),
             };
 
             _stagedTree = new Tree(false)
@@ -100,50 +92,26 @@ namespace WsSourceControl.VcsTabs
                 Parent = stagedScroll,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
             };
-            _stagedTree.SelectedChanged += (before, after) => OnFileSelected(after, isStaged: true);
-            _stagedTree.RightClick += (node, loc) => OnFileRightClick(node, loc, isStaged: true);
+            _stagedTree.SelectedChanged += (before, after) => OnFileSelected(after, true);
+            _stagedTree.RightClick += (node, loc) => OnFileRightClick(node, loc, true);
+            _stagedEmptyLabel = BuildEmptyListLabel(stagedScroll, "No staged changes.");
 
             var unstagedContainer = new ContainerControl { AnchorPreset = AnchorPresets.StretchAll, Offsets = Margin.Zero, Parent = verticalSplit.Panel2 };
-            
-            _unstagedHeader = new Label
+            _unstagedHeader = new SectionHeader("Unstaged")
             {
-                Text = "Unstaged Changes (0)",
                 Parent = unstagedContainer,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = Margin.Zero,
-                Height = 24,
-                HorizontalAlignment = TextAlignment.Near,
-                Margin = new Margin(4, 0, 0, 0),
+                Offsets = new Margin(0, 0, 0, SourceControlTheme.SectionHeaderHeight),
+                Height = SourceControlTheme.SectionHeaderHeight,
             };
-
-            var discardAllBtn = new Button
-            {
-                Text = "Discard All",
-                Parent = unstagedContainer,
-                AnchorPreset = AnchorPresets.TopRight,
-                Offsets = new Margin(-76, 74, 2, 20),
-                BackgroundColor = new Color(0.5f, 0.15f, 0.15f),
-                BackgroundColorHighlighted = new Color(0.7f, 0.2f, 0.2f),
-            };
-            _discardAllBtn = discardAllBtn;
-            _discardAllBtn.Clicked += OnDiscardAll;
-
-            var stageAllBtn = new Button
-            {
-                Text = "Stage All",
-                Parent = unstagedContainer,
-                AnchorPreset = AnchorPresets.TopRight,
-                Offsets = new Margin(-154, 74, 2, 20),
-                BackgroundColor = Style.Current.BackgroundSelected,
-                BackgroundColorHighlighted = Style.Current.BackgroundSelected.RGBMultiplied(1.2f),
-            };
-            stageAllBtn.Clicked += OnStageAll;
+            _unstagedHeader.AddAction(UiActions.PrimaryButton("Stage All", OnStageAll, 76f, "Stage all unstaged files"));
+            _unstagedHeader.AddAction(UiActions.DangerButton("Discard", OnDiscardAll, 70f, "Discard all local changes"));
 
             var unstagedScroll = new Panel(ScrollBars.Both)
             {
                 Parent = unstagedContainer,
                 AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = new Margin(0, 0, 24, 0),
+                Offsets = new Margin(0, 0, SourceControlTheme.SectionHeaderHeight, 0),
             };
 
             _unstagedTree = new Tree(false)
@@ -151,10 +119,10 @@ namespace WsSourceControl.VcsTabs
                 Parent = unstagedScroll,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
             };
-            _unstagedTree.SelectedChanged += (before, after) => OnFileSelected(after, isStaged: false);
-            _unstagedTree.RightClick += (node, loc) => OnFileRightClick(node, loc, isStaged: false);
+            _unstagedTree.SelectedChanged += (before, after) => OnFileSelected(after, false);
+            _unstagedTree.RightClick += (node, loc) => OnFileRightClick(node, loc, false);
+            _unstagedEmptyLabel = BuildEmptyListLabel(unstagedScroll, "No unstaged changes.");
         }
-
 
         private void BuildDetailPanel(ContainerControl parent)
         {
@@ -162,38 +130,34 @@ namespace WsSourceControl.VcsTabs
             {
                 AnchorPreset = AnchorPresets.StretchAll,
                 Offsets = Margin.Zero,
-                SplitterValue = 0.7f, // Diff takes 70%, Commit takes 30%
+                SplitterValue = 0.7f,
                 Parent = parent,
             };
 
             var diffContainer = new ContainerControl { AnchorPreset = AnchorPresets.StretchAll, Offsets = Margin.Zero, Parent = verticalSplit.Panel1 };
-
-            var diffHeader = new Label
+            var diffHeader = new SectionHeader("Diff")
             {
-                Text = "Diff",
                 Parent = diffContainer,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
                 Offsets = Margin.Zero,
-                Height = 24,
-                HorizontalAlignment = TextAlignment.Near,
-                Margin = new Margin(4, 0, 0, 0),
             };
 
             _diffFileLabel = new Label
             {
-                Parent = diffContainer,
+                Parent = diffHeader,
                 Text = "(select a file to view diff)",
-                TextColor = Style.Current.ForegroundGrey,
-                AnchorPreset = AnchorPresets.TopRight,
-                Offsets = new Margin(-304, 300, 2, 20),
-                HorizontalAlignment = TextAlignment.Far,
+                TextColor = SourceControlTheme.MutedText,
+                AnchorPreset = AnchorPresets.StretchAll,
+                Offsets = new Margin(52, 6, 0, SourceControlTheme.SectionHeaderHeight),
+                HorizontalAlignment = TextAlignment.Near,
+                VerticalAlignment = TextAlignment.Center,
             };
 
             _diffTextBox = new TextBox(true, 0, 0, 0)
             {
                 Parent = diffContainer,
                 AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = new Margin(0, 0, 24, 0),
+                Offsets = new Margin(0, 0, SourceControlTheme.SectionHeaderHeight, 0),
                 IsReadOnly = true,
                 BackgroundColor = Style.Current.TextBoxBackground,
                 BorderColor = Style.Current.BorderNormal,
@@ -201,23 +165,17 @@ namespace WsSourceControl.VcsTabs
             };
 
             var commitContainer = new ContainerControl { AnchorPreset = AnchorPresets.StretchAll, Offsets = Margin.Zero, Parent = verticalSplit.Panel2 };
-
-            var commitHeader = new Label
+            _commitHeader = new SectionHeader("Commit")
             {
-                Text = "Commit",
                 Parent = commitContainer,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
                 Offsets = Margin.Zero,
-                Height = 24,
-                HorizontalAlignment = TextAlignment.Near,
-                Margin = new Margin(4, 0, 0, 0),
             };
 
-            var commitBottomArea = new ContainerControl
+            var commitBottomArea = new PinnedBottomPanel
             {
                 Parent = commitContainer,
-                AnchorPreset = AnchorPresets.HorizontalStretchBottom,
-                Offsets = new Margin(0, 0, -60, 60), // Y=-60, Height=60
+                PinHeight = 60f,
             };
 
             var bottomRow = new HorizontalPanel
@@ -228,13 +186,12 @@ namespace WsSourceControl.VcsTabs
                 Spacing = 4f,
             };
 
-            var amendCheck = new CheckBox
+            _amendCheck = new CheckBox
             {
                 Parent = bottomRow,
                 Size = new Float2(16, 16),
             };
-            _amendCheck = amendCheck;
-            
+
             new Label
             {
                 Parent = bottomRow,
@@ -242,26 +199,34 @@ namespace WsSourceControl.VcsTabs
                 AutoWidth = true,
             };
 
-            var commitBtn = new Button
-            {
-                Text = "Commit Staged Changes",
-                Parent = commitBottomArea,
-                AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = new Margin(4, 4, 30, 28),
-                BackgroundColor = Style.Current.BackgroundSelected,
-                BackgroundColorHighlighted = Style.Current.BackgroundSelected.RGBMultiplied(1.2f),
-            };
-            commitBtn.Clicked += OnCommit;
+            _commitButton = UiActions.PrimaryButton("Commit Staged Changes", OnCommit, 180f, "Commit staged files");
+            _commitButton.Parent = commitBottomArea;
+            _commitButton.AnchorPreset = AnchorPresets.HorizontalStretchTop;
+            _commitButton.Offsets = new Margin(4, 4, 30, 28);
 
             _commitMessage = new TextBox(true, 0, 0, 0)
             {
                 Parent = commitContainer,
                 AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = new Margin(4, 4, 24, 60), // Fits perfectly between header and bottom area
+                Offsets = new Margin(4, 4, SourceControlTheme.SectionHeaderHeight + 2f, 60),
                 WatermarkText = "Commit message...",
             };
+            _commitMessage.TextChanged += UpdateCommitButtonState;
         }
 
+        private static Label BuildEmptyListLabel(ContainerControl parent, string text)
+        {
+            return new Label
+            {
+                Parent = parent,
+                Text = text,
+                TextColor = SourceControlTheme.MutedText,
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = new Margin(8, 8, 8, 22),
+                HorizontalAlignment = TextAlignment.Near,
+                VerticalAlignment = TextAlignment.Center,
+            };
+        }
 
         private void OnFileSelected(List<TreeNode> selection, bool isStaged)
         {
@@ -270,15 +235,14 @@ namespace WsSourceControl.VcsTabs
                 if (_diffFileLabel != null)
                     _diffFileLabel.Text = "(select a file to view diff)";
                 if (_diffTextBox != null)
-                    _diffTextBox.Text = "";
+                    _diffTextBox.Text = string.Empty;
                 return;
             }
 
-            _diffFileLabel.Text = node.FilePath;
-            string diff = isStaged
-                ? GitWrapper.GetDiffStaged(node.FilePath)
-                : GitWrapper.GetDiff(node.FilePath);
-            _diffTextBox.Text = string.IsNullOrEmpty(diff) ? "(No diff available)" : diff;
+            var state = isStaged ? "staged" : "unstaged";
+            _diffFileLabel.Text = $"{node.FilePath}  ({state}{GetChangeBadges(node.Change)})";
+            var diff = isStaged ? GitWrapper.GetDiffStaged(node.FilePath) : GitWrapper.GetDiff(node.FilePath);
+            _diffTextBox.Text = string.IsNullOrEmpty(diff) ? GetNoDiffMessage(node.Change) : diff;
         }
 
         private void OnFileRightClick(TreeNode node, Float2 location, bool isStaged)
@@ -295,8 +259,8 @@ namespace WsSourceControl.VcsTabs
                 });
                 menu.AddButton("View Diff (Staged)", () =>
                 {
-                    _diffFileLabel.Text = cn.FilePath;
-                    _diffTextBox.Text = GitWrapper.GetDiffStaged(cn.FilePath) ?? "(No diff)";
+                    _diffFileLabel.Text = $"{cn.FilePath}  (staged{GetChangeBadges(cn.Change)})";
+                    _diffTextBox.Text = GitWrapper.GetDiffStaged(cn.FilePath) ?? GetNoDiffMessage(cn.Change);
                 });
             }
             else
@@ -308,15 +272,15 @@ namespace WsSourceControl.VcsTabs
                 });
                 menu.AddButton("Discard Changes", () =>
                 {
-                    if (!ConfirmRiskyAction($"Discard changes in:\n\n{cn.FilePath}\n\nThis cannot be undone."))
+                    if (!UiActions.ConfirmDanger($"Discard changes in:\n\n{cn.FilePath}\n\nThis cannot be undone."))
                         return;
                     GitWrapper.Reset(cn.FilePath);
                     RefreshData();
                 });
                 menu.AddButton("View Diff", () =>
                 {
-                    _diffFileLabel.Text = cn.FilePath;
-                    _diffTextBox.Text = GitWrapper.GetDiff(cn.FilePath) ?? "(No diff)";
+                    _diffFileLabel.Text = $"{cn.FilePath}  (unstaged{GetChangeBadges(cn.Change)})";
+                    _diffTextBox.Text = GitWrapper.GetDiff(cn.FilePath) ?? GetNoDiffMessage(cn.Change);
                 });
             }
 
@@ -343,11 +307,11 @@ namespace WsSourceControl.VcsTabs
             var paths = new List<string>();
             foreach (var c in changes)
                 if (c.Staged) paths.Add(c.FilePath);
-            if (paths.Count > 0)
-            {
-                GitWrapper.Unstage(paths.ToArray());
-                RefreshData();
-            }
+            if (paths.Count <= 0)
+                return;
+
+            GitWrapper.Unstage(paths.ToArray());
+            RefreshData();
         }
 
         private void OnDiscardAll()
@@ -360,48 +324,34 @@ namespace WsSourceControl.VcsTabs
             if (preview.Length > 1200)
                 preview = preview.Substring(0, 1200) + "\n...";
 
-            if (!ConfirmRiskyAction($"Discard all local changes and remove untracked files?\n\n{preview}\n\nThis cannot be undone."))
+            if (!UiActions.ConfirmDanger($"Discard all local changes and remove untracked files?\n\n{preview}\n\nThis cannot be undone."))
                 return;
 
             GitWrapper.ResetHard();
             RefreshData();
         }
 
-        /// <summary>
-        /// Called each frame to auto-reset the discard confirmation if the timer expires.
-        /// </summary>
         public void Update(float dt)
         {
-            if (_discardConfirmPending)
-            {
-                _discardConfirmTimer -= dt;
-                if (_discardConfirmTimer <= 0f)
-                    ResetDiscardButton();
-            }
-        }
-
-        private void ResetDiscardButton()
-        {
-            _discardConfirmPending = false;
-            if (_discardAllBtn != null)
-            {
-                _discardAllBtn.Text = "Discard All";
-                _discardAllBtn.BackgroundColor = new Color(0.5f, 0.15f, 0.15f);
-                _discardAllBtn.BackgroundColorHighlighted = new Color(0.7f, 0.2f, 0.2f);
-            }
         }
 
         private void OnCommit()
         {
-            string msg = _commitMessage?.Text ?? string.Empty;
+            var msg = _commitMessage?.Text ?? string.Empty;
             if (string.IsNullOrWhiteSpace(msg))
             {
                 Debug.LogWarning("Please enter a commit message.");
                 return;
             }
 
-            bool amend = _amendCheck?.Checked ?? false;
-            if (amend && !ConfirmRiskyAction("Amend the previous commit?\n\nThis rewrites the latest commit."))
+            if (_stagedCount == 0)
+            {
+                Debug.LogWarning("Stage at least one change before committing.");
+                return;
+            }
+
+            var amend = _amendCheck?.Checked ?? false;
+            if (amend && !UiActions.ConfirmDanger("Amend the previous commit?\n\nThis rewrites the latest commit."))
                 return;
 
             if (amend)
@@ -415,20 +365,10 @@ namespace WsSourceControl.VcsTabs
             DataChanged?.Invoke();
         }
 
-        private bool ConfirmRiskyAction(string message)
-        {
-            return MessageBox.Show(message, "Confirm Git Operation", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
-        }
-
-
-        /// <summary>
-        /// Refresh staged/unstaged trees and update group headers with counts.
-        /// Groups files by directory using folder TreeNodes.
-        /// </summary>
         public void RefreshData()
         {
-            ResetDiscardButton();
             PopulateChangesTrees();
+            UpdateCommitButtonState();
         }
 
         private void PopulateChangesTrees()
@@ -438,14 +378,15 @@ namespace WsSourceControl.VcsTabs
             _unstagedTree.DisposeChildren();
 
             var changes = GitWrapper.GetStatus();
-            int stagedCount = 0;
-            int unstagedCount = 0;
-
-            // Separate staged and unstaged
+            var filter = _filterBox?.Text?.Trim() ?? string.Empty;
             var staged = new List<GitChange>();
             var unstaged = new List<GitChange>();
+
             foreach (var change in changes)
             {
+                if (!string.IsNullOrEmpty(filter) && change.FilePath.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
                 if (change.Staged)
                     staged.Add(change);
                 else
@@ -454,23 +395,19 @@ namespace WsSourceControl.VcsTabs
 
             PopulateTreeWithFolders(_stagedTree, staged);
             PopulateTreeWithFolders(_unstagedTree, unstaged);
-            stagedCount = staged.Count;
-            unstagedCount = unstaged.Count;
+            _stagedCount = staged.Count;
 
             _stagedTree.PerformLayout();
             _unstagedTree.PerformLayout();
+            _stagedHeader?.SetCount(staged.Count);
+            _unstagedHeader?.SetCount(unstaged.Count);
 
-            if (_stagedHeader != null)
-                _stagedHeader.Text = $"Staged Changes ({stagedCount})";
-            if (_unstagedHeader != null)
-                _unstagedHeader.Text = $"Unstaged Changes ({unstagedCount})";
+            if (_stagedEmptyLabel != null)
+                _stagedEmptyLabel.Visible = staged.Count == 0;
+            if (_unstagedEmptyLabel != null)
+                _unstagedEmptyLabel.Visible = unstaged.Count == 0;
         }
 
-        /// <summary>
-        /// Groups files by their parent directory and creates folder TreeNodes.
-        /// Files at the root level are added directly to the tree.
-        /// Files in subdirectories are grouped under a folder node.
-        /// </summary>
         private void PopulateTreeWithFolders(Tree tree, List<GitChange> changes)
         {
             var rootFiles = new List<GitChange>();
@@ -478,46 +415,70 @@ namespace WsSourceControl.VcsTabs
 
             foreach (var change in changes)
             {
-                string path = change.FilePath;
-                int lastSlash = path.IndexOf('/');
+                var path = change.FilePath;
+                var lastSlash = path.IndexOf('/');
                 if (lastSlash < 0)
                 {
-                    // Root-level file
                     rootFiles.Add(change);
+                    continue;
                 }
-                else
-                {
-                    // File in a subdirectory — group by top-level folder
-                    string folder = path.Substring(0, lastSlash);
-                    if (!folderGroups.ContainsKey(folder))
-                        folderGroups[folder] = new List<GitChange>();
-                    folderGroups[folder].Add(change);
-                }
+
+                var folder = path.Substring(0, lastSlash);
+                if (!folderGroups.ContainsKey(folder))
+                    folderGroups[folder] = new List<GitChange>();
+                folderGroups[folder].Add(change);
             }
 
-            // Add root-level files first
             foreach (var change in rootFiles)
-            {
                 new ChangeTreeNode(change).Parent = tree;
-            }
 
-            // Add folder groups
             foreach (var kvp in folderGroups)
             {
                 var folderNode = new TreeNode
                 {
                     Text = $"{kvp.Key}/ ({kvp.Value.Count})",
-                    TextColor = Style.Current.ForegroundGrey,
+                    TextColor = SourceControlTheme.MutedText,
                 };
                 folderNode.Parent = tree;
 
                 foreach (var change in kvp.Value)
-                {
                     new ChangeTreeNode(change).Parent = folderNode;
-                }
 
                 folderNode.Expand();
             }
+        }
+
+        private void UpdateCommitButtonState()
+        {
+            if (_commitButton == null)
+                return;
+
+            var hasMessage = !string.IsNullOrWhiteSpace(_commitMessage?.Text);
+            _commitButton.Enabled = _stagedCount > 0 && hasMessage;
+            _commitHeader?.SetSubtitle(_stagedCount > 0 ? $"{_stagedCount} staged" : "No staged changes");
+        }
+
+        private static string GetChangeBadges(GitChange change)
+        {
+            var badges = string.Empty;
+            if (change.IsBinary)
+                badges += ", binary";
+            if (change.IsLfsPointer)
+                badges += ", LFS";
+            if (change.IsConflict)
+                badges += ", conflict";
+            return badges;
+        }
+
+        private static string GetNoDiffMessage(GitChange change)
+        {
+            if (change.IsBinary)
+                return "(Binary file. No text diff available.)";
+            if (change.IsLfsPointer)
+                return "(Git LFS pointer. No file diff available.)";
+            if (change.IsConflict)
+                return "(Conflict file. Resolve conflict markers before committing.)";
+            return "(No diff available.)";
         }
     }
 }

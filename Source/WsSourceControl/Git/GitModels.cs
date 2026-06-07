@@ -111,7 +111,7 @@ namespace WsSourceControl.Git
         public int ExitCode;
         public bool RefreshRequired;
 
-        public string Error => Exception != null ? Exception.Message : Message;
+        public string Error => !string.IsNullOrWhiteSpace(Message) ? Message : Exception?.Message;
 
         public static GitOperationResult Ok(string message = "", string output = "", bool refreshRequired = true)
         {

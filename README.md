@@ -79,22 +79,6 @@ The plugin does not store tokens, passwords, PATs, or SSH key paths. Remote oper
 
 4. Restart Flax Editor.
 
-## Development
-
-Build the generated Flax C# project locally:
-
-```bash
-dotnet build Source/WsSourceControl.csproj -c Editor.Linux.Development
-```
-
-Run the standalone Git core tests:
-
-```bash
-dotnet run --project Tests/WsSourceControl.Tests/WsSourceControl.Tests.csproj
-```
-
-The generated Flax `.csproj` remains ignored. If Flax regenerates project files, it will pick up plugin source files and the LibGit2Sharp reference from `Source/WsSourceControl/WsSourceControl.Build.cs`.
-
 ## Limitations
 
 - macOS packaging is not included yet.

@@ -17,7 +17,8 @@ namespace WsSourceControl.UI
         {
             Entry = entry;
             var shortHash = string.IsNullOrEmpty(entry.Hash) ? string.Empty : entry.Hash.Substring(0, System.Math.Min(8, entry.Hash.Length));
-            Text = $"{shortHash}  {entry.Date}  {entry.Author}";
+            Text = $"{shortHash}  {ShortMessage}  -  {entry.Author}  {entry.Date}";
+            TextColor = Style.Current.Foreground;
         }
 
         /// <summary>

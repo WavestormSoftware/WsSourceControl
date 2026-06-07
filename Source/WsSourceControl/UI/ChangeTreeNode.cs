@@ -18,7 +18,14 @@ namespace WsSourceControl.UI
         {
             Change = change;
             IsStaged = change.Staged;
-            Text = $"{GitWrapper.GetChangeTypePrefix(change.Type)}  {change.FilePath}";
+            var badges = string.Empty;
+            if (change.IsBinary)
+                badges += "  [binary]";
+            if (change.IsLfsPointer)
+                badges += "  [LFS]";
+            if (change.IsConflict)
+                badges += "  [conflict]";
+            Text = $"{GitWrapper.GetChangeTypePrefix(change.Type)}  {change.FilePath}{badges}";
             TextColor = GitWrapper.GetChangeColor(change.Type);
         }
 

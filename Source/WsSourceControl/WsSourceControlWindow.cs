@@ -1,6 +1,4 @@
 using System;
-using FlaxEditor.GUI;
-using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.GUI.Docking;
 using FlaxEditor.GUI.Input;
 using FlaxEditor.GUI.Tabs;
@@ -14,34 +12,13 @@ using WsSourceControl.VcsTabs;
 namespace WsSourceControl
 {
     /// <summary>
-    /// Redesigned Source Control window for Flax Editor.
-    /// 
-    /// Architecture:
-    ///   - StatusBar at top: branch, sync status, remote, operation state
-    ///   - Tabs: Changes (4-quadrant split), History, Branches, Sync
-    ///   - Tab content delegated to separate classes for modularity
-    ///   - GitAsyncWrapper integration for non-blocking operations
-    ///   - Cross-tab refresh via DataChanged events
-    /// 
-    /// Layout:
-    ///   ┌─ StatusBar ─────────────────────────────────────────────┐
-    ///   │ main  Up 2 Down 1  │  origin: github.com/...  │ Ready  │
-    ///   └─────────────────────────────────────────────────────────┘
-    ///   ┌─ ToolStrip ─────────────────────────────────────────────┐
-    ///   │ [Refresh]                                               │
-    ///   └─────────────────────────────────────────────────────────┘
-    ///   ┌─ Tabs ──────────────────────────────────────────────────┐
-    ///   │ [Changes (3)]  [History]  [Branches]  [Sync]          │
-    ///   │                                                         │
-    ///   │  (Tab Content Area)                                    │
-    ///   │                                                         │
-    ///   └─────────────────────────────────────────────────────────┘
+    /// Source Control editor window with a repository header, tabbed content,
+    /// and async Git operations.
     /// </summary>
     public class WsSourceControlWindow : EditorWindow
     {
-        private VcsStatusBar _statusBar;
+        private SourceControlHeader _header;
         private Tabs _tabs;
-        private ToolStrip _toolStrip;
         private GitAsyncWrapper _asyncWrapper;
 
         // Tab content handlers
@@ -49,6 +26,7 @@ namespace WsSourceControl
         private HistoryTab _historyTab;
         private BranchesTab _branchesTab;
         private SyncTab _syncTab;
+        private EmptyState _noRepoState;
 
         // Tab references for badge updates
         private Tab _changesTabRef;
@@ -69,51 +47,34 @@ namespace WsSourceControl
 
             // Initialize async wrapper for non-blocking git ops
             _asyncWrapper = new GitAsyncWrapper(
-                statusText => _statusBar?.UpdateStatus(statusText, statusText != "Ready"),
+                statusText => _header?.UpdateStatus(statusText, statusText != "Ready"),
                 error => 
                 {
                     Debug.LogError($"Git error: {error}");
                     FlaxEngine.MessageBox.Show(error, "Git Error", FlaxEngine.MessageBoxButtons.OK, FlaxEngine.MessageBoxIcon.Error);
                 });
 
-            _toolStrip = new ToolStrip
+            _header = new SourceControlHeader
             {
                 Parent = this,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = new Margin(0, 0, 0, 28),
+                Offsets = new Margin(0, 0, 0, SourceControlTheme.HeaderHeight),
             };
-
-            var refreshBtn = _toolStrip.AddButton("Refresh");
-            refreshBtn.Clicked += RefreshAllData;
-
-            _toolStrip.AddSeparator();
-
-            var fetchBtn = _toolStrip.AddButton("Fetch");
-            fetchBtn.Clicked += () => _asyncWrapper.RunAsync(GitWrapper.Fetch, res => { if (res.Success) RefreshAllData(); }, "Fetching...");
-
-            var pullBtn = _toolStrip.AddButton("Pull");
-            pullBtn.Clicked += () => _asyncWrapper.RunAsync(GitWrapper.Pull, res => { if (res.Success) RefreshAllData(); }, "Pulling...");
-
-            var pushBtn = _toolStrip.AddButton("Push");
-            pushBtn.Clicked += () => _asyncWrapper.RunAsync(GitWrapper.Push, res => { if (res.Success) RefreshAllData(); }, "Pushing...");
+            _header.AddCommand("Refresh", RefreshAllData, "Refresh source control data (F5)");
+            _header.AddCommand("Fetch", () => _asyncWrapper.RunAsync(GitWrapper.Fetch, res => { if (res.Success) RefreshAllData(); }, "Fetching..."), "Fetch from remote");
+            _header.AddCommand("Pull", () => _asyncWrapper.RunAsync(GitWrapper.Pull, res => { if (res.Success) RefreshAllData(); }, "Pulling..."), "Pull current branch");
+            _header.AddCommand("Push", () => _asyncWrapper.RunAsync(GitWrapper.Push, res => { if (res.Success) RefreshAllData(); }, "Pushing..."), "Push current branch");
+            _header.RefreshFromGit();
 
             _tabs = new Tabs
             {
                 Orientation = Orientation.Horizontal,
                 UseScroll = true,
-                TabsSize = new Float2(120, 28),
+                TabsSize = new Float2(120, SourceControlTheme.TabsHeight),
                 Parent = this,
                 AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = new Margin(0, 0, 28, 28), // Starts below ToolStrip (28), leaves 28 for StatusBar
+                Offsets = new Margin(0, 0, SourceControlTheme.HeaderHeight, 0),
             };
-
-            _statusBar = new VcsStatusBar
-            {
-                Parent = this,
-                AnchorPreset = AnchorPresets.HorizontalStretchBottom,
-                Offsets = new Margin(0, 0, -28, 28), // Bottom docked, 28px tall
-            };
-            _statusBar.RefreshFromGit();
 
             // Changes tab (primary)
             _changesTabRef = _tabs.AddTab(new Tab("Changes"));
@@ -150,9 +111,8 @@ namespace WsSourceControl
             for (int i = ChildrenCount - 1; i >= 0; i--)
                 Children[i].Dispose();
 
-            _statusBar = null;
+            _header = null;
             _tabs = null;
-            _toolStrip = null;
             _asyncWrapper?.Dispose();
             _asyncWrapper = null;
             _changesTab = null;
@@ -160,6 +120,7 @@ namespace WsSourceControl
             _branchesTab = null;
             _syncTab = null;
             _changesTabRef = null;
+            _noRepoState = null;
 
             BuildUI();
         }
@@ -171,7 +132,7 @@ namespace WsSourceControl
         private void OnChangesDataChanged()
         {
             _historyTab?.RefreshData();
-            _statusBar?.RefreshFromGit();
+            _header?.RefreshFromGit();
             UpdateChangesBadge();
         }
 
@@ -182,7 +143,7 @@ namespace WsSourceControl
         {
             _changesTab?.RefreshData();
             _historyTab?.RefreshData();
-            _statusBar?.RefreshFromGit();
+            _header?.RefreshFromGit();
             UpdateChangesBadge();
         }
 
@@ -194,7 +155,7 @@ namespace WsSourceControl
             _changesTab?.RefreshData();
             _historyTab?.RefreshData();
             _branchesTab?.RefreshData();
-            _statusBar?.RefreshFromGit();
+            _header?.RefreshFromGit();
             UpdateChangesBadge();
         }
 
@@ -207,8 +168,8 @@ namespace WsSourceControl
             _historyTab?.RefreshData();
             _branchesTab?.RefreshData();
             _syncTab?.RefreshData();
-            _statusBar?.RefreshFromGit();
-            _statusBar?.UpdateStatus("Ready", false);
+            _header?.RefreshFromGit();
+            _header?.UpdateStatus("Ready", false);
             UpdateChangesBadge();
         }
 
@@ -230,6 +191,8 @@ namespace WsSourceControl
         {
             base.Update(deltaTime);
             _changesTab?.Update(deltaTime);
+            if (_noRepoState != null)
+                _noRepoState.Bounds = new Rectangle((Width - _noRepoState.Width) * 0.5f, (Height - _noRepoState.Height) * 0.5f, _noRepoState.Width, _noRepoState.Height);
         }
 
         public override bool OnKeyDown(KeyboardKeys key)
@@ -254,52 +217,20 @@ namespace WsSourceControl
                 Parent = this,
             };
 
-            var content = new VerticalPanel
+            _noRepoState = new EmptyState(
+                "Source Control",
+                "Project is not inside a Git repository.",
+                "Initialize Repository",
+                () =>
+                {
+                    GitWrapper.InitRepo();
+                    RebuildUI();
+                },
+                "Creates Flax .gitignore defaults.")
             {
-                AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = Margin.Zero,
-                AutoSize = true,
-                Spacing = 8f,
-                Margin = new Margin(16f),
                 Parent = container,
-            };
-
-            // Center the content visually
-            var title = new Label
-            {
-                Parent = content,
-                Text = "Source Control",
-                TextColor = Style.Current.Foreground,
-                HorizontalAlignment = TextAlignment.Center,
-                AutoWidth = true,
-                Height = 32,
-                Margin = new Margin(0, 0, 16, 8),
-            };
-
-            var infoLabel = new Label
-            {
-                Parent = content,
-                Text = "This project is not inside a Git repository.\nInitialize a repository to start using source control.",
-                TextColor = Style.Current.ForegroundGrey,
-                HorizontalAlignment = TextAlignment.Center,
-                AutoWidth = true,
-                Margin = new Margin(0, 0, 4, 4),
-            };
-
-            var initBtn = new Button
-            {
-                Parent = content,
-                Text = "Initialize Git Repository",
-                Width = 200,
-                Height = 32,
-                X = 50, // slight offset for centering
-                BackgroundColor = Style.Current.BackgroundSelected,
-                BackgroundColorHighlighted = Style.Current.BackgroundSelected.RGBMultiplied(1.2f),
-            };
-            initBtn.Clicked += () =>
-            {
-                GitWrapper.InitRepo();
-                RebuildUI();
+                Width = 360f,
+                Height = 110f,
             };
         }
 

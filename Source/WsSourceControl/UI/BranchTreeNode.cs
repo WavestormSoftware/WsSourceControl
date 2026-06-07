@@ -14,13 +14,17 @@ namespace WsSourceControl.UI
         public readonly bool IsCurrent;
         public readonly bool IsRemote;
 
-        public BranchTreeNode(string branchName, bool isCurrent, bool isRemote)
+        public BranchTreeNode(string branchName, bool isCurrent, bool isRemote, string upstream = null, int ahead = 0, int behind = 0)
         {
             BranchName = branchName;
             IsCurrent = isCurrent;
             IsRemote = isRemote;
-            Text = isCurrent ? $"\u25CF {branchName}" : $"  {branchName}";
-            TextColor = isCurrent ? Style.Current.BorderSelected : Style.Current.Foreground;
+            var marker = isCurrent ? "* " : "  ";
+            var scope = isRemote ? "[remote]" : "[local]";
+            var tracking = string.IsNullOrEmpty(upstream) ? string.Empty : $"  -> {upstream}";
+            var sync = ahead != 0 || behind != 0 ? $"  Up {ahead} Down {behind}" : string.Empty;
+            Text = $"{marker}{scope} {branchName}{tracking}{sync}";
+            TextColor = isCurrent ? Style.Current.BorderSelected : isRemote ? Style.Current.ForegroundGrey : Style.Current.Foreground;
         }
     }
 }

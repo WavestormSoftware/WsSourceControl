@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -470,8 +471,20 @@ namespace WsSourceControl.Git
             }
             catch (Exception ex)
             {
-                return GitOperationResult.Fail("Git operation failed.", ex);
+                return GitOperationResult.Fail(GetGitErrorMessage(ex), ex);
             }
+        }
+
+        private static string GetGitErrorMessage(Exception ex)
+        {
+            var message = ex?.Message ?? "Git operation failed.";
+            if (message.IndexOf("credentials", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                message.IndexOf("authentication", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Git authentication failed. LibGit2Sharp cannot show an interactive credential prompt inside Flax. Configure an SSH agent or Git credential helper, or set WS_GIT_USERNAME and WS_GIT_PASSWORD/WS_GIT_TOKEN before starting the editor.";
+            }
+
+            return string.IsNullOrWhiteSpace(message) ? "Git operation failed." : message;
         }
 
         private T WithRepository<T>(Func<Repository, T> func)
@@ -561,7 +574,118 @@ namespace WsSourceControl.Git
 
         private Credentials CredentialsProvider(string url, string usernameFromUrl, SupportedCredentialTypes types)
         {
-            return new DefaultCredentials();
+            if ((types & SupportedCredentialTypes.UsernamePassword) != 0)
+            {
+                var username = Environment.GetEnvironmentVariable("WS_GIT_USERNAME");
+                var password = Environment.GetEnvironmentVariable("WS_GIT_PASSWORD") ?? Environment.GetEnvironmentVariable("WS_GIT_TOKEN");
+                if (!string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password))
+                {
+                    return new UsernamePasswordCredentials
+                    {
+                        Username = username,
+                        Password = password
+                    };
+                }
+
+                var helperCredentials = GetCredentialsFromGitCredentialHelper(url, usernameFromUrl);
+                if (helperCredentials != null)
+                    return helperCredentials;
+            }
+
+            if ((types & SupportedCredentialTypes.Default) != 0)
+                return new DefaultCredentials();
+
+            return null;
+        }
+
+        private Credentials GetCredentialsFromGitCredentialHelper(string url, string usernameFromUrl)
+        {
+            if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                return null;
+
+            if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+                return null;
+
+            try
+            {
+                var input = new StringBuilder();
+                input.AppendLine($"protocol={uri.Scheme}");
+                input.AppendLine($"host={uri.Host}");
+                if (!string.IsNullOrEmpty(uri.AbsolutePath) && uri.AbsolutePath != "/")
+                    input.AppendLine($"path={uri.AbsolutePath.TrimStart('/')}");
+                if (!string.IsNullOrWhiteSpace(usernameFromUrl))
+                    input.AppendLine($"username={usernameFromUrl}");
+                input.AppendLine();
+
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "git",
+                    Arguments = "credential fill",
+                    WorkingDirectory = ProjectPath,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using (var process = Process.Start(startInfo))
+                {
+                    if (process == null)
+                        return null;
+
+                    process.StandardInput.Write(input.ToString());
+                    process.StandardInput.Close();
+
+                    if (!process.WaitForExit(3000))
+                    {
+                        try { process.Kill(); } catch { }
+                        return null;
+                    }
+
+                    if (process.ExitCode != 0)
+                        return null;
+
+                    var output = process.StandardOutput.ReadToEnd();
+                    var values = ParseCredentialOutput(output);
+                    if (!values.TryGetValue("username", out var username) ||
+                        !values.TryGetValue("password", out var password) ||
+                        string.IsNullOrWhiteSpace(username) ||
+                        string.IsNullOrWhiteSpace(password))
+                    {
+                        return null;
+                    }
+
+                    return new UsernamePasswordCredentials
+                    {
+                        Username = username,
+                        Password = password
+                    };
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Dictionary<string, string> ParseCredentialOutput(string output)
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrEmpty(output))
+                return values;
+
+            var lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            foreach (var line in lines)
+            {
+                var separator = line.IndexOf('=');
+                if (separator <= 0)
+                    continue;
+
+                values[line.Substring(0, separator)] = line.Substring(separator + 1);
+            }
+
+            return values;
         }
 
         private string GetBranchLabel(Repository repo)
